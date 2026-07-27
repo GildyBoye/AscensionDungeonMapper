@@ -1,0 +1,19 @@
+## Interface: 33000
+## Title: Ascension Dungeon Mapper
+## Notes: Pick a dungeon or raid map, draw routes and add point notes, then save and share them with an export string.
+## Author: You
+## Version: 1.0.0
+## SavedVariables: AscensionDungeonMapperDB
+
+Libs\LibStub\LibStub.lua
+Libs\LibDeflate\LibDeflate.lua
+
+Serializer.lua
+MapData.lua
+Core.lua
+MapDiscovery.lua
+MapTexture.lua
+DrawEngine.lua
+ShareExport.lua
+UI.lua
+MinimapIcon.lua

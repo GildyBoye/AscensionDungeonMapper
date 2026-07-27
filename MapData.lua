@@ -1,0 +1,279 @@
+-- AscensionDungeonMapper MapData
+--
+-- Static list of dungeons/raids by era. This intentionally contains NO Blizzard
+-- numeric map IDs -- those are auto-discovered at runtime (see MapDiscovery.lua)
+-- the first time a player walks into each instance, then cached in SavedVariables
+-- and shared automatically to whoever the player shares routes with.
+--
+-- "key" is our own stable identifier (never changes, never depends on any
+-- in-game numeric ID) used to store routes and cached map IDs.
+
+AscensionDungeonMapper = AscensionDungeonMapper or {}
+local DR = AscensionDungeonMapper
+
+DR.Eras = { "Classic", "TBC", "WotLK" }
+
+DR.EraLabels = {
+	Classic = "Classic",
+	TBC = "The Burning Crusade",
+	WotLK = "Wrath of the Lich King",
+}
+
+-- levelRange is the standard reference leveling range for each instance
+-- (the same numbers you'd see on Wowhead/WowWiki, and close to what 3.3.5's
+-- own Dungeon Finder tool used for the WotLK ones). Ascension's own leveling
+-- pace/systems may not match 1:1 -- treat these as a rough guide, same
+-- spirit as the pre-seeded map IDs.
+DR.Dungeons = {
+
+	Classic = {
+		{ key = "ragefirechasm", name = "Ragefire Chasm", kind = "dungeon", levelRange = "13-18" },
+		{ key = "deadmines", name = "The Deadmines", kind = "dungeon", levelRange = "15-21" },
+		{ key = "wailingcaverns", name = "Wailing Caverns", kind = "dungeon", levelRange = "15-25" },
+		{ key = "shadowfangkeep", name = "Shadowfang Keep", kind = "dungeon", levelRange = "18-26" },
+		{ key = "blackfathomdeeps", name = "Blackfathom Deeps", kind = "dungeon", levelRange = "20-28" },
+		{ key = "stockade", name = "The Stockade", kind = "dungeon", levelRange = "22-30" },
+		{ key = "gnomeregan", name = "Gnomeregan", kind = "dungeon", levelRange = "24-32" },
+		{ key = "razorfenkraul", name = "Razorfen Kraul", kind = "dungeon", levelRange = "25-35" },
+		-- Scarlet Monastery's 4 wings already show as distinct map art via
+		-- the existing per-level system (numLevels=4 on this same key), so
+		-- they're split into their own list entries/route storage below
+		-- rather than needing separate map-ID discovery. This parent entry
+		-- stays for instance-name matching in MapDiscovery.lua but isn't
+		-- directly selectable.
+		{ key = "scarletmonastery", name = "Scarlet Monastery", kind = "dungeon", levelRange = "26-45", hidden = true },
+		{ key = "scarletmonastery_graveyard", name = "Scarlet Monastery: Graveyard", kind = "dungeon", levelRange = "26-32", parentKey = "scarletmonastery", level = 1 },
+		{ key = "scarletmonastery_library", name = "Scarlet Monastery: Library", kind = "dungeon", levelRange = "28-36", parentKey = "scarletmonastery", level = 2 },
+		{ key = "scarletmonastery_armory", name = "Scarlet Monastery: Armory", kind = "dungeon", levelRange = "30-38", parentKey = "scarletmonastery", level = 3 },
+		{ key = "scarletmonastery_cathedral", name = "Scarlet Monastery: Cathedral", kind = "dungeon", levelRange = "34-45", parentKey = "scarletmonastery", level = 4 },
+		{ key = "razorfendowns", name = "Razorfen Downs", kind = "dungeon", levelRange = "35-45" },
+		{ key = "uldaman", name = "Uldaman", kind = "dungeon", levelRange = "35-45" },
+		{ key = "zulfarrak", name = "Zul'Farrak", kind = "dungeon", levelRange = "42-50" },
+		{ key = "maraudon", name = "Maraudon", kind = "dungeon", levelRange = "42-50" },
+		{ key = "sunkentemple", name = "Temple of Atal'Hakkar (Sunken Temple)", kind = "dungeon", levelRange = "48-55" },
+		{ key = "blackrockdepths", name = "Blackrock Depths", kind = "dungeon", levelRange = "50-60" },
+		{ key = "lowerblackrockspire", name = "Lower Blackrock Spire", kind = "dungeon", levelRange = "52-60" },
+		{ key = "upperblackrockspire", name = "Upper Blackrock Spire", kind = "dungeon", levelRange = "58-60" },
+		-- Same underlying mechanism as Scarlet Monastery (one instance,
+		-- multiple map levels per key) but unlike SM it's NOT one level per
+		-- wing -- West and East each span multiple levels internally.
+		-- `level` is where selecting the wing starts you; `maxLevel` (when
+		-- present) caps how far the level control can move within that wing
+		-- before it'd be wandering into a different wing's floors. Mapping
+		-- (1=North, 2-4=West, 5-6=East) is per the user's best recollection,
+		-- not independently confirmed -- verify with /dr debug's "current
+		-- level" reading from inside each wing if routes end up misfiled.
+		{ key = "diremaul", name = "Dire Maul", kind = "dungeon", levelRange = "55-60", hidden = true },
+		{ key = "diremaul_north", name = "Dire Maul: North", kind = "dungeon", levelRange = "55-60", parentKey = "diremaul", level = 1 },
+		{ key = "diremaul_west", name = "Dire Maul: West", kind = "dungeon", levelRange = "55-60", parentKey = "diremaul", level = 2, maxLevel = 4 },
+		{ key = "diremaul_east", name = "Dire Maul: East", kind = "dungeon", levelRange = "55-60", parentKey = "diremaul", level = 5, maxLevel = 6 },
+		{ key = "scholomance", name = "Scholomance", kind = "dungeon", levelRange = "58-60" },
+		{ key = "stratholme", name = "Stratholme", kind = "dungeon", levelRange = "58-60" },
+		{ key = "moltencore", name = "Molten Core", kind = "raid", levelRange = "60" },
+		{ key = "onyxialair", name = "Onyxia's Lair", kind = "raid", levelRange = "60" },
+		{ key = "blackwinglair", name = "Blackwing Lair", kind = "raid", levelRange = "60" },
+		{ key = "zulgurub", name = "Zul'Gurub", kind = "raid", levelRange = "60" },
+		{ key = "ruinsofahnqiraj", name = "Ruins of Ahn'Qiraj", kind = "raid", levelRange = "60" },
+		{ key = "templeofahnqiraj", name = "Temple of Ahn'Qiraj", kind = "raid", levelRange = "60" },
+	},
+
+	TBC = {
+		{ key = "hellfireramparts", name = "Hellfire Ramparts", kind = "dungeon", levelRange = "60-63" },
+		{ key = "bloodfurnace", name = "The Blood Furnace", kind = "dungeon", levelRange = "61-64" },
+		{ key = "shatteredhalls", name = "The Shattered Halls", kind = "dungeon", levelRange = "62-65" },
+		{ key = "slavepens", name = "The Slave Pens", kind = "dungeon", levelRange = "62-64" },
+		{ key = "underbog", name = "The Underbog", kind = "dungeon", levelRange = "63-65" },
+		{ key = "steamvault", name = "The Steamvault", kind = "dungeon", levelRange = "67-70" },
+		{ key = "manatombs", name = "Mana-Tombs", kind = "dungeon", levelRange = "64-66" },
+		{ key = "auchenaicrypts", name = "Auchenai Crypts", kind = "dungeon", levelRange = "65-67" },
+		{ key = "sethekkhalls", name = "Sethekk Halls", kind = "dungeon", levelRange = "65-67" },
+		{ key = "shadowlabyrinth", name = "Shadow Labyrinth", kind = "dungeon", levelRange = "68-70" },
+		{ key = "oldhillsbrad", name = "Old Hillsbrad Foothills", kind = "dungeon", levelRange = "66-68" },
+		{ key = "blackmorass", name = "The Black Morass", kind = "dungeon", levelRange = "68-70" },
+		{ key = "magistersterrace", name = "Magisters' Terrace", kind = "dungeon", levelRange = "70" },
+		{ key = "themechanar", name = "The Mechanar", kind = "dungeon", levelRange = "70" },
+		{ key = "thebotanica", name = "The Botanica", kind = "dungeon", levelRange = "70" },
+		{ key = "thearcatraz", name = "The Arcatraz", kind = "dungeon", levelRange = "70" },
+		{ key = "karazhan", name = "Karazhan", kind = "raid", levelRange = "70" },
+		{ key = "gruulslair", name = "Gruul's Lair", kind = "raid", levelRange = "70" },
+		{ key = "magtheridonslair", name = "Magtheridon's Lair", kind = "raid", levelRange = "70" },
+		{ key = "serpentshrinecavern", name = "Serpentshrine Cavern", kind = "raid", levelRange = "70" },
+		{ key = "tempestkeep", name = "Tempest Keep (The Eye)", kind = "raid", levelRange = "70" },
+		{ key = "mounthyjal", name = "Mount Hyjal", kind = "raid", levelRange = "70" },
+		{ key = "blacktemple", name = "Black Temple", kind = "raid", levelRange = "70" },
+		{ key = "zulaman", name = "Zul'Aman", kind = "raid", levelRange = "70" },
+		{ key = "sunwellplateau", name = "Sunwell Plateau", kind = "raid", levelRange = "70" },
+	},
+
+	WotLK = {
+		{ key = "utgardekeep", name = "Utgarde Keep", kind = "dungeon", levelRange = "70-72" },
+		{ key = "thenexus", name = "The Nexus", kind = "dungeon", levelRange = "71-73" },
+		{ key = "azjolnerub", name = "Azjol-Nerub", kind = "dungeon", levelRange = "72-74" },
+		{ key = "ahnkahet", name = "Ahn'kahet: The Old Kingdom", kind = "dungeon", levelRange = "72-74" },
+		{ key = "draktharonkeep", name = "Drak'Tharon Keep", kind = "dungeon", levelRange = "74-76" },
+		{ key = "violethold", name = "Violet Hold", kind = "dungeon", levelRange = "75-77" },
+		{ key = "gundrak", name = "Gundrak", kind = "dungeon", levelRange = "76-78" },
+		{ key = "hallsofstone", name = "Halls of Stone", kind = "dungeon", levelRange = "77-79" },
+		{ key = "hallsoflightning", name = "Halls of Lightning", kind = "dungeon", levelRange = "78-80" },
+		{ key = "theoculus", name = "The Oculus", kind = "dungeon", levelRange = "80" },
+		{ key = "utgardepinnacle", name = "Utgarde Pinnacle", kind = "dungeon", levelRange = "80" },
+		{ key = "trialofthechampion", name = "Trial of the Champion", kind = "dungeon", levelRange = "80" },
+		{ key = "forgeofsouls", name = "The Forge of Souls", kind = "dungeon", levelRange = "80" },
+		{ key = "pitofsaron", name = "Pit of Saron", kind = "dungeon", levelRange = "80" },
+		{ key = "hallsofreflection", name = "Halls of Reflection", kind = "dungeon", levelRange = "80" },
+		{ key = "cullingofstratholme", name = "The Culling of Stratholme", kind = "dungeon", levelRange = "80" },
+		{ key = "naxxramas", name = "Naxxramas", kind = "raid", levelRange = "80" },
+		{ key = "obsidiansanctum", name = "The Obsidian Sanctum", kind = "raid", levelRange = "80" },
+		{ key = "eyeofeternity", name = "The Eye of Eternity", kind = "raid", levelRange = "80" },
+		{ key = "ulduar", name = "Ulduar", kind = "raid", levelRange = "80" },
+		{ key = "trialofthecrusader", name = "Trial of the Crusader", kind = "raid", levelRange = "80" },
+		{ key = "icecrowncitadel", name = "Icecrown Citadel", kind = "raid", levelRange = "80" },
+		{ key = "rubysanctum", name = "The Ruby Sanctum", kind = "raid", levelRange = "80" },
+	},
+}
+
+-- Build a flat lookup: key -> {name, era, kind}
+DR.DungeonByKey = {}
+for era, list in pairs(DR.Dungeons) do
+	for _, entry in ipairs(list) do
+		DR.DungeonByKey[entry.key] = {
+			name = entry.name,
+			era = era,
+			kind = entry.kind,
+			-- Sub-dungeon wing entries (e.g. Scarlet Monastery's wings,
+			-- Dire Maul's wings) point at a parentKey for map data
+			-- (SetKnownMap/DefaultMapIDs) while keeping their own key for
+			-- route storage. level is where selecting the wing starts you;
+			-- maxLevel (if the wing spans more than one floor, like Dire
+			-- Maul's West/East) caps how far the level control can move
+			-- within that wing. A wing with no maxLevel is pinned to
+			-- exactly `level` (the level control doesn't apply at all).
+			parentKey = entry.parentKey,
+			level = entry.level,
+			maxLevel = entry.maxLevel,
+			hidden = entry.hidden,
+		}
+	end
+end
+
+-- Normalize an instance name (as returned by GetInstanceInfo()) for matching
+-- against our dungeon list: lowercase, strip apostrophes/punctuation/spaces.
+function DR.NormalizeName(name)
+	if not name then return "" end
+	name = name:lower()
+	name = name:gsub("[^%a%d]", "")
+	return name
+end
+
+-- Precompute normalized-name -> key lookup for auto-discovery matching.
+DR.KeyByNormalizedName = {}
+for key, info in pairs(DR.DungeonByKey) do
+	DR.KeyByNormalizedName[DR.NormalizeName(info.name)] = key
+end
+
+-- DefaultMapIDs -----------------------------------------------------------
+--
+-- Runtime auto-discovery (MapDiscovery.lua) is the source of truth, but it
+-- requires physically walking into an instance once. To let most dungeons
+-- work immediately -- with zero visits required -- this table pre-seeds the
+-- WorldMapAreaID for dungeons where that ID is well-documented outside of
+-- this addon, so we're not the ones guessing at ~65 numbers from memory.
+--
+-- These are SetMapByID()-ready values (WorldMapAreaID as returned by
+-- GetCurrentMapAreaID() minus 1, per this addon's convention -- see
+-- MapDiscovery.lua). Cross-checked against Mapster's InstanceMaps.lua
+-- (github.com/Trimitor/WDM-addons, actively used on Ascension, feeds
+-- SetMapByID directly with no transform) -- a prior version of this table,
+-- sourced from a different community list, was off by exactly 1 on every
+-- single entry, which is why maps weren't loading. Fixed here.
+--
+-- Zul'Aman is omitted -- the original table's guess for it turned out to
+-- collide with Serpentshrine Cavern's real (verified) ID, so it's better
+-- left to MapDiscovery.lua on first visit than left in with a bad guess.
+--
+-- MapTexture.lua sanity-checks every one of these against GetMapInfo()
+-- before trusting it, so a bad or server-specific ID just gets skipped
+-- rather than silently showing the wrong dungeon's map.
+DR.DefaultMapIDs = {
+	-- Classic
+	ragefirechasm = 680,
+	deadmines = 756,
+	wailingcaverns = 749,
+	shadowfangkeep = 764,
+	blackfathomdeeps = 688,
+	stockade = 690,
+	gnomeregan = 691,
+	razorfenkraul = 761,
+	scarletmonastery = 762,
+	razorfendowns = 760,
+	uldaman = 692,
+	zulfarrak = 686,
+	maraudon = 750,
+	sunkentemple = 687,
+	blackrockdepths = 704,
+	lowerblackrockspire = 721,
+	upperblackrockspire = 721, -- same physical map as LBRS; dungeon level differentiates
+	diremaul = 699,
+	scholomance = 763,
+	stratholme = 765,
+	moltencore = 696,
+	onyxialair = 718,
+	blackwinglair = 755,
+	zulgurub = 697, -- was 792 in the old table; that wasn't off-by-1, it was just wrong
+	ruinsofahnqiraj = 717,
+	templeofahnqiraj = 766, -- was 771 in the old table; also not off-by-1
+
+	-- TBC
+	hellfireramparts = 797,
+	bloodfurnace = 725,
+	shatteredhalls = 710,
+	slavepens = 728,
+	underbog = 726,
+	steamvault = 727,
+	manatombs = 732,
+	auchenaicrypts = 722,
+	sethekkhalls = 723,
+	shadowlabyrinth = 724,
+	oldhillsbrad = 734,
+	blackmorass = 733,
+	magistersterrace = 798,
+	themechanar = 730,
+	thebotanica = 729,
+	thearcatraz = 731,
+	karazhan = 799,
+	gruulslair = 776,
+	magtheridonslair = 779,
+	serpentshrinecavern = 780,
+	tempestkeep = 782,
+	mounthyjal = 775, -- was 605 in the old table (WotLK 5-man range); also not off-by-1
+	blacktemple = 796,
+	sunwellplateau = 789,
+	-- zulaman intentionally omitted: the old table's guess (780) turned out to
+	-- collide with Serpentshrine Cavern's real ID once Serpentshrine Cavern
+	-- was verified. No independent source for Zul'Aman -- relies on
+	-- MapDiscovery.lua the first time someone actually visits.
+
+	-- WotLK
+	utgardekeep = 523,
+	thenexus = 520,
+	azjolnerub = 533,
+	ahnkahet = 522,
+	draktharonkeep = 534,
+	violethold = 536,
+	gundrak = 530,
+	hallsofstone = 526,
+	hallsoflightning = 525,
+	theoculus = 528,
+	utgardepinnacle = 524,
+	trialofthechampion = 542,
+	forgeofsouls = 601,
+	pitofsaron = 602,
+	hallsofreflection = 603,
+	cullingofstratholme = 521,
+	naxxramas = 535,
+	obsidiansanctum = 531,
+	eyeofeternity = 527,
+	ulduar = 529,
+	icecrowncitadel = 604,
+	rubysanctum = 609,
+}
