@@ -1,12 +1,3 @@
--- AscensionDungeonMapper DrawEngine
---
--- Handles freehand-drawing route strokes and point markers on a canvas frame,
--- storing everything in normalized (0..1) coordinates so it's independent of
--- the canvas's actual pixel size. Strokes are rendered as a run of short
--- straight segments sampled while the mouse button is held, using
--- Texture:SetRotation() per segment -- confirmed available in the 3.3.5
--- client (Blizzard's own WorldMapFrame.lua uses it for the player arrow icon).
-
 AscensionDungeonMapper = AscensionDungeonMapper or {}
 local DR = AscensionDungeonMapper
 DR.DrawEngine = {}
@@ -17,45 +8,33 @@ local DEFAULT_LINE_COLOR = { 0.2, 0.55, 0.95, 0.95 }
 local POINT_SIZE = 14
 local POINT_COLOR = { 0.95, 0.25, 0.2, 1 }
 
--- Selectable palette for the Draw tool (picker shown in UI.lua while
--- drawing is active). Alpha is fixed; only RGB is chosen.
 local LINE_COLORS = {
-	{ 0.2, 0.55, 0.95 },  -- Blue (default)
-	{ 0.9, 0.2, 0.2 },    -- Red
-	{ 0.25, 0.85, 0.35 }, -- Green
-	{ 0.95, 0.85, 0.15 }, -- Yellow
-	{ 0.65, 0.35, 0.9 },  -- Purple
-	{ 0.95, 0.55, 0.15 }, -- Orange
-	{ 0.95, 0.95, 0.95 }, -- White
+	{ 0.2, 0.55, 0.95 },
+	{ 0.9, 0.2, 0.2 },
+	{ 0.25, 0.85, 0.35 },
+	{ 0.95, 0.85, 0.15 },
+	{ 0.65, 0.35, 0.9 },
+	{ 0.95, 0.55, 0.15 },
+	{ 0.95, 0.95, 0.95 },
 }
 Draw.LINE_COLORS = LINE_COLORS
 
--- Color new strokes are drawn in. Changing it doesn't affect strokes already
--- on the canvas -- CreateLineWidget snapshots whatever this is at creation
--- time into the widget's own entry.color.
 local currentLineColor = DEFAULT_LINE_COLOR
 
--- A fresh table each call so previously-stored entry.color references
--- aren't retroactively mutated by a later color change.
 function Draw.SetLineColor(r, g, b)
 	currentLineColor = { r, g, b, DEFAULT_LINE_COLOR[4] }
 end
 
--- Minimum cursor movement (normalized) before a freehand stroke lays down
--- another segment -- keeps texture count reasonable on a long drag while
--- still reading as a smooth continuous line.
 local MIN_SEGMENT_DIST = 0.008
 
--- Erase-mode click tolerance, in canvas pixels, for "is this click on a
--- drawn stroke" hit-testing.
 local ERASE_TOLERANCE_PX = 6
 
-local canvas -- the active canvas frame
-local mode -- nil | "line" | "point" | "erase"
-local history = {} -- undo stack: entries are {kind="stroke", strokeId=...} or {kind="point", entry=...}
+local canvas
+local mode
+local history = {}
 
-local lineWidgets = {}  -- array of {tex=Texture, x1,y1,x2,y2, strokeId}
-local pointWidgets = {} -- array of {frame=Frame, x, y, title, text}
+local lineWidgets = {}
+local pointWidgets = {}
 
 local nextStrokeId = 0
 local function AllocateStrokeId()
@@ -63,13 +42,10 @@ local function AllocateStrokeId()
 	return nextStrokeId
 end
 
--- In-progress stroke state (mode == "line", mouse button held) --------------
 local painting = false
 local currentStrokeId
 local strokeHasSegment
 local lastX, lastY
-
--- Coordinate helpers ---------------------------------------------------
 
 local function GetNormalizedCursorPos()
 	local scale = canvas:GetEffectiveScale()
@@ -86,8 +62,6 @@ local function ClampNorm(v)
 	if v > 1 then return 1 end
 	return v
 end
-
--- Line rendering ---------------------------------------------------------
 
 local function PositionLineTexture(tex, x1, y1, x2, y2)
 	local w, h = canvas:GetWidth(), canvas:GetHeight()
@@ -116,10 +90,6 @@ local function CreateLineWidget(x1, y1, x2, y2, strokeId, color)
 	return entry
 end
 
--- Distance (in canvas pixels) from a normalized point to a normalized
--- segment -- used for erase-mode hit-testing, since a rotated Texture can't
--- take clicks on its own and a freehand path is too irregular for a simple
--- bounding-box button per segment.
 local function DistPointToSegmentPx(px, py, x1, y1, x2, y2)
 	local w, h = canvas:GetWidth(), canvas:GetHeight()
 	px, py = px * w, py * h
@@ -151,11 +121,6 @@ local function FindNearestStrokeId(x, y)
 	return bestId
 end
 
--- Point rendering ---------------------------------------------------------
-
--- The 8 built-in raid target markers, in Blizzard's standard 1-8 order
--- (Star, Circle, Diamond, Triangle, Moon, Square, Cross, Skull). Every
--- client ships these -- no custom art to bundle.
 local RAID_ICONS = {
 	"Interface\\TargetingFrame\\UI-RaidTargetingIcon_1",
 	"Interface\\TargetingFrame\\UI-RaidTargetingIcon_2",
@@ -194,11 +159,6 @@ local function CreatePointWidget(x, y, title, text, icon)
 
 	local entry = { frame = frame, x = x, y = y, title = title or "", text = text or "", icon = icon }
 
-	-- No icon (nil) falls back to the plain color square that's always
-	-- existed (border on, opaque square); icon 1-8 swaps in the matching
-	-- raid target texture, which has its own transparent silhouette -- the
-	-- square border stays hidden for those so it doesn't show through as an
-	-- ugly black box around the icon's actual (non-square) shape.
 	function entry.SetIcon(newIcon)
 		entry.icon = newIcon
 		if newIcon and RAID_ICONS[newIcon] then
@@ -233,11 +193,6 @@ local function CreatePointWidget(x, y, title, text, icon)
 	return entry
 end
 
--- Public API ---------------------------------------------------------------
-
--- onPointClick(entry): called when a point is clicked outside erase mode.
--- Set this from UI.lua to open the note editor. entry has x,y,title,text and
--- entry.SetTitleText(title, text) to update after editing.
 Draw.onPointClick = nil
 
 function Draw.Init(canvasFrame)
@@ -325,10 +280,6 @@ function Draw.RemovePoint(entry)
 	end
 end
 
--- Removes every segment belonging to a stroke (a freehand drag, or a single
--- imported/loaded line, which is just a one-segment stroke) and drops any
--- undo-history entry pointing at it, so a later Undo can't reference a
--- stroke that erase-mode already deleted.
 function Draw.RemoveStrokeById(strokeId)
 	for i = #lineWidgets, 1, -1 do
 		local l = lineWidgets[i]
@@ -364,7 +315,6 @@ function Draw.Clear()
 	currentStrokeId = nil
 end
 
--- Reposition all existing widgets, e.g. after the canvas is resized.
 function Draw.RelayoutAll()
 	for _, l in ipairs(lineWidgets) do
 		PositionLineTexture(l.tex, l.x1, l.y1, l.x2, l.y2)
@@ -374,10 +324,6 @@ function Draw.RelayoutAll()
 	end
 end
 
--- Serialize current canvas contents into plain data tables. Lines carry
--- their color as elements 5-7 (RGB) after the 4 coords -- old saved routes
--- without those just don't have them, which LoadRouteData treats as "use
--- the default color", so this is a backward-compatible wire format change.
 function Draw.GetRouteData()
 	local lines, points = {}, {}
 	for _, l in ipairs(lineWidgets) do
@@ -389,11 +335,6 @@ function Draw.GetRouteData()
 	return lines, points
 end
 
--- Load route data onto the canvas, replacing whatever is currently there.
--- Segments from saved/imported data don't carry stroke grouping, so each one
--- becomes its own single-segment stroke for erase/undo purposes. Color is
--- elements 5-7 (RGB) if present; older saved data without it just uses the
--- default color (CreateLineWidget's own fallback).
 function Draw.LoadRouteData(lines, points)
 	Draw.Clear()
 	for _, l in ipairs(lines or {}) do

@@ -1,7 +1,3 @@
--- AscensionDungeonMapper UI
--- Main window: era toggle, dungeon list, drawing canvas, toolbar, and the
--- small popups for naming/importing/exporting routes and editing point notes.
-
 AscensionDungeonMapper = AscensionDungeonMapper or {}
 local DR = AscensionDungeonMapper
 DR.UI = {}
@@ -12,8 +8,8 @@ local mainFrame
 local canvas
 local dungeonListContent
 local dungeonButtons = {}
-local dungeonHeaders = {} -- "Dungeons" / "Raids" section labels above dungeonButtons
-local collapsedGroups = {} -- [era.."_"..kind] = true, session-only (not saved)
+local dungeonHeaders = {}
+local collapsedGroups = {}
 local modeButtons = {}
 
 local currentEra = "Classic"
@@ -26,9 +22,7 @@ local pointEditorFrame
 
 local MAX_ROUTES_PER_DUNGEON = 5
 local routeBoxSlots = {}
-local RefreshRouteBox -- forward-declared: SelectDungeon (below) needs to call it
-
--- Small widget helpers -------------------------------------------------
+local RefreshRouteBox
 
 local function CreateActionButton(parent, text, width)
 	local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
@@ -38,11 +32,6 @@ local function CreateActionButton(parent, text, width)
 	return btn
 end
 
--- Every "this is currently selected" indicator in the addon (mode buttons,
--- the dungeon list, route slots, marker icons, draw colors) uses this same
--- gold border rather than each having its own ad-hoc highlight style --
--- it's the same border art Blizzard uses to mark the active stance/
--- shapeshift button. Hidden by default; caller shows/hides it.
 local function CreateSelectionBorder(parent, padding)
 	padding = padding or 3
 	local border = parent:CreateTexture(nil, "OVERLAY")
@@ -54,9 +43,6 @@ local function CreateSelectionBorder(parent, padding)
 	return border
 end
 
--- 3.3.5 has no "BasicFrameTemplateWithInset" (that's a much later retail
--- template) so dialog-style windows are built by hand here, using the same
--- backdrop art and close button Blizzard's own StaticPopup frames use.
 local function CreateBorderedFrame(name, parent, width, height, title)
 	local f = CreateFrame("Frame", name, parent)
 	f:SetWidth(width)
@@ -103,10 +89,6 @@ local function CreateListButton(parent, width)
 	dot:SetHeight(6)
 	dot:SetPoint("RIGHT", btn, "RIGHT", -4, 0)
 	btn.dot = dot
-	-- Wide/short list rows don't suit the square action-button border used
-	-- elsewhere -- it's built for roughly-square buttons and stretches badly
-	-- at this aspect ratio. Use Blizzard's own selected-list-row texture
-	-- instead (the same one the quest log uses for its selected entry).
 	local selectedBar = btn:CreateTexture(nil, "OVERLAY")
 	selectedBar:SetPoint("TOPLEFT", btn, "TOPLEFT", -2, 2)
 	selectedBar:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 2, -2)
@@ -117,9 +99,6 @@ local function CreateListButton(parent, width)
 	return btn
 end
 
--- modeButtons is keyed by mode string ("line"/"point"/"erase"). mode == nil
--- ("no tool active") has no button of its own -- clicking whichever tool is
--- currently active toggles it back off.
 local function SetModeButtonHighlight(activeMode)
 	for m, btn in pairs(modeButtons) do
 		if m == activeMode then
@@ -129,8 +108,6 @@ local function SetModeButtonHighlight(activeMode)
 		end
 	end
 end
-
--- Dungeon list -----------------------------------------------------------
 
 local function SelectDungeon(key)
 	currentDungeonKey = key
@@ -147,7 +124,6 @@ local function SelectDungeon(key)
 	DR.MapTexture.Build(canvas, mapKey, currentLevel)
 	DR.UI.UpdateLevelDisplay()
 
-	-- Auto-load the most recently updated route, if any.
 	local routes = DR.GetRoutesForDungeon(key)
 	local bestName, bestTime = nil, -1
 	for name, data in pairs(routes) do
@@ -173,7 +149,7 @@ end
 local HEADER_ROW_HEIGHT = 16
 local BUTTON_ROW_HEIGHT = 20
 
-local RefreshDungeonList -- forward-declared: header OnClick below needs to call it
+local RefreshDungeonList
 
 local function GetOrCreateHeader(index)
 	local header = dungeonHeaders[index]
@@ -195,11 +171,6 @@ local function GetOrCreateHeader(index)
 	return header
 end
 
--- DR.Dungeons entries are already ordered dungeons-then-raids per era (see
--- MapData.lua), so a "Dungeons" / "Raids" header just needs to be inserted
--- wherever entry.kind changes -- no re-sorting required. Collapsed groups
--- (click a header to toggle) skip laying out their buttons entirely; the
--- collapse state is session-only, not saved.
 function RefreshDungeonList()
 	local list = DR.Dungeons[currentEra]
 	local yOffset = 0
@@ -234,9 +205,6 @@ function RefreshDungeonList()
 				btn:SetPoint("TOPLEFT", dungeonListContent, "TOPLEFT", 0, -yOffset)
 				btn:Show()
 				btn.dungeonKey = entry.key
-				-- Embedded color code keeps the level range muted regardless
-				-- of selection state, which is shown via selectedBorder
-				-- (gold border) rather than changing the text color.
 				btn.text:SetText(entry.levelRange and (entry.name .. " |cff888888(" .. entry.levelRange .. ")|r") or entry.name)
 				btn.text:SetTextColor(1, 1, 1)
 				if entry.key == currentDungeonKey then
@@ -276,15 +244,6 @@ local function SetEra(era)
 	RefreshRouteBox()
 end
 
--- Level controls -----------------------------------------------------------
-
--- A wing entry's level range is [info.level, info.maxLevel or info.level].
--- Single-floor wings (Scarlet Monastery's, Dire Maul's North) have no
--- maxLevel, so that range is a single number and the control has nothing to
--- do -- switching levels out from under those would silently start saving
--- another wing's routes under this wing's key. Multi-floor wings (Dire
--- Maul's West/East) get a working control clamped to their own range so you
--- can still move between their internal floors.
 local function WingLevelRange(info)
 	if not info or not info.level then return nil, nil end
 	return info.level, info.maxLevel or info.level
@@ -327,8 +286,6 @@ local function ChangeLevel(delta)
 	DR.UI.UpdateLevelDisplay()
 end
 
--- Route management -----------------------------------------------------
-
 function DR.UI.LoadRoute(name)
 	if not currentDungeonKey then return end
 	local routes = DR.GetRoutesForDungeon(currentDungeonKey)
@@ -336,10 +293,6 @@ function DR.UI.LoadRoute(name)
 	if not data then return end
 	local info = DR.DungeonByKey[currentDungeonKey]
 	currentRouteName = name
-	-- Prefer the level the route was actually drawn on over the wing's
-	-- default start level -- matters for wings that span multiple floors
-	-- (e.g. Dire Maul's West/East), where a saved route might be on any of
-	-- them, not just the first.
 	currentLevel = data.level or info.level or 0
 	DR.MapTexture.Build(canvas, info.parentKey or currentDungeonKey, currentLevel)
 	DR.DrawEngine.LoadRouteData(data.lines, data.points)
@@ -375,17 +328,6 @@ local function SaveCurrentRoute()
 	RefreshRouteBox()
 end
 
--- Each dungeon (or wing, for split entries like Scarlet Monastery) gets up
--- to MAX_ROUTES_PER_DUNGEON saved routes, shown as fixed slots in the route
--- box -- renaming/overwriting an existing route doesn't count against the cap.
---
--- This is shared by two different callers with two different intents: the
--- "New Route" button (wants a genuinely blank canvas under the new name --
--- that button clears the canvas itself, before this ever runs) and Save's
--- fallback when no route is named yet (the user has very likely already
--- drawn something -- e.g. picked a dungeon and started drawing immediately
--- without naming a route first -- and just wants it saved under a name, not
--- wiped). So this function itself must never clear the canvas.
 function DR.UI.CreateNewRoute(name)
 	name = DR.Trim(name)
 	if name == "" then
@@ -419,11 +361,8 @@ local function DeleteCurrentRoute()
 	RefreshRouteBox()
 end
 
--- Route box: persistent MAX_ROUTES_PER_DUNGEON-slot list for the selected
--- dungeon, built once in BuildMainFrame (routeBoxSlots) and refreshed
--- whenever the selection or the route list changes.
 function RefreshRouteBox()
-	if #routeBoxSlots == 0 then return end -- not built yet
+	if #routeBoxSlots == 0 then return end
 	local routes = currentDungeonKey and DR.GetRoutesForDungeon(currentDungeonKey) or {}
 	local names = {}
 	for name in pairs(routes) do names[#names + 1] = name end
@@ -447,14 +386,10 @@ function RefreshRouteBox()
 	end
 end
 
--- Point editor -------------------------------------------------------------
-
 local editingEntry
 
 local ICON_PICKER_SIZE = 24
 
--- One button in the point-editor icon row. iconValue is nil for "no icon"
--- (falls back to the plain color square) or 1-8 for a raid target marker.
 local function MakeIconButton(iconRow, index, iconValue, texturePath)
 	local btn = CreateFrame("Button", nil, iconRow)
 	btn:SetWidth(ICON_PICKER_SIZE)
@@ -594,8 +529,6 @@ local function OpenPointEditor(entry)
 	pointEditorFrame.titleBox:SetFocus()
 end
 
--- Export / Import ------------------------------------------------------
-
 StaticPopupDialogs["ASCENSIONDUNGEONMAPPER_NEW_ROUTE"] = {
 	text = "Name this route:",
 	button1 = "Create",
@@ -615,42 +548,8 @@ StaticPopupDialogs["ASCENSIONDUNGEONMAPPER_NEW_ROUTE"] = {
 	hideOnEscape = true,
 }
 
--- 3.3.5 has no API to open a browser, so "linking" to GitHub/Discord means
--- the same thing Export does: show the URL in a copyable edit box.
 local GITHUB_URL = "https://github.com/GildyBoye/AscensionDungeonMapper"
 local DISCORD_URL = "https://discord.com/invite/mQjgHCW"
-
-StaticPopupDialogs["ASCENSIONDUNGEONMAPPER_GITHUB_LINK"] = {
-	text = "AscensionDungeonMapper on GitHub\nCtrl+A then Ctrl+C to copy:",
-	button1 = CLOSE,
-	hasEditBox = true,
-	editBoxWidth = 350,
-	OnShow = function(self)
-		self.editBox:SetText(GITHUB_URL)
-		self.editBox:HighlightText()
-		self.editBox:SetFocus()
-	end,
-	EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
-	timeout = 0,
-	whileDead = true,
-	hideOnEscape = true,
-}
-
-StaticPopupDialogs["ASCENSIONDUNGEONMAPPER_DISCORD_LINK"] = {
-	text = "Join the Discord\nCtrl+A then Ctrl+C to copy:",
-	button1 = CLOSE,
-	hasEditBox = true,
-	editBoxWidth = 350,
-	OnShow = function(self)
-		self.editBox:SetText(DISCORD_URL)
-		self.editBox:HighlightText()
-		self.editBox:SetFocus()
-	end,
-	EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
-	timeout = 0,
-	whileDead = true,
-	hideOnEscape = true,
-}
 
 StaticPopupDialogs["ASCENSIONDUNGEONMAPPER_CONFIRM_CLEAR"] = {
 	text = "Clear the entire map? This removes every line and point and can't be undone.",
@@ -689,11 +588,6 @@ function DR.UI.HandleImport(text)
 	DR.Print("Imported route '" .. routeName .. "' for " .. info.name .. ".")
 end
 
--- Export/Import text dialogs. StaticPopup's built-in edit box is single-line
--- and only 350px wide -- fine for a short URL, but a compressed route string
--- can run to hundreds or thousands of characters, and having it all scroll
--- sideways inside a tiny box makes it hard to trust a Ctrl+A actually
--- grabbed everything. These give a real multi-line scrollable box instead.
 local TEXT_DIALOG_W, TEXT_DIALOG_H = 520, 360
 
 local function BuildTextDialog(name, title)
@@ -764,6 +658,41 @@ local function OpenImportDialog()
 end
 DR.UI.OpenImportDialog = OpenImportDialog
 
+local function BuildLinkDialog(name, title, hint, url)
+	local f = BuildTextDialog(name, title)
+	f.hint:SetText(hint)
+	f.linkURL = url
+
+	local closeBtn = CreateActionButton(f, "Close", 80)
+	closeBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 14)
+	closeBtn:SetScript("OnClick", function() f:Hide() end)
+
+	return f
+end
+
+local function OpenLinkDialog(dialog)
+	dialog.editBox:SetText(dialog.linkURL)
+	dialog:Show()
+	dialog.editBox:HighlightText()
+	dialog.editBox:SetFocus()
+end
+
+local githubDialog
+local function OpenGithubDialog()
+	if not githubDialog then
+		githubDialog = BuildLinkDialog("AscensionDungeonMapperGithubDialog", "AscensionDungeonMapper on GitHub", "Ctrl+A then Ctrl+C to copy the whole link:", GITHUB_URL)
+	end
+	OpenLinkDialog(githubDialog)
+end
+
+local discordDialog
+local function OpenDiscordDialog()
+	if not discordDialog then
+		discordDialog = BuildLinkDialog("AscensionDungeonMapperDiscordDialog", "Join the Discord", "Ctrl+A then Ctrl+C to copy the whole link:", DISCORD_URL)
+	end
+	OpenLinkDialog(discordDialog)
+end
+
 local function ExportCurrent()
 	if not currentDungeonKey then
 		DR.Print("Select a dungeon first.")
@@ -786,10 +715,6 @@ local function ExportCurrent()
 	end
 	OpenExportDialog("Share string for \"" .. name .. "\"", str)
 end
-
--- Draw-tool color picker: a small floating swatch row over the bottom of
--- the canvas, shown only while the Draw tool is active. Picking a color
--- doesn't touch strokes already drawn -- see DrawEngine's currentLineColor.
 
 local COLOR_SWATCH_SIZE = 18
 
@@ -831,18 +756,11 @@ local function BuildColorPicker(parentCanvas)
 
 		picker.buttons[#picker.buttons + 1] = btn
 	end
-	picker.buttons[1].selectedBorder:Show() -- Blue is the default
+	picker.buttons[1].selectedBorder:Show()
 
 	return picker
 end
 
--- Main frame construction -----------------------------------------------
-
--- Everything right of the sidebar (header/canvas/toolbars) starts here.
--- UIPanelScrollFrameTemplate's scrollbar renders OUTSIDE the scroll frame's
--- own declared width (roughly another 18-20px to the right of it), so this
--- needs real clearance past the sidebar's right edge (14 + 226 = 240) or it
--- visually collides with the canvas -- 34px gets it well clear.
 local CONTENT_X = 274
 
 local function BuildMainFrame()
@@ -851,14 +769,9 @@ local function BuildMainFrame()
 	f:SetFrameStrata("HIGH")
 	f:Hide()
 
-	-- CreateBorderedFrame centers the title over the whole frame by default,
-	-- but the sidebar throws off that center relative to the dungeon-name
-	-- header below it -- re-center over the same span (CONTENT_X..+CANVAS_W)
-	-- so the two actually line up.
 	f.titleText:ClearAllPoints()
 	f.titleText:SetPoint("TOP", f, "TOPLEFT", CONTENT_X + CANVAS_W / 2, -14)
 
-	-- Era buttons
 	local eraLabels = { Classic = "Classic", TBC = "TBC", WotLK = "WotLK" }
 	local prevBtn
 	for _, era in ipairs(DR.Eras) do
@@ -872,7 +785,6 @@ local function BuildMainFrame()
 		prevBtn = btn
 	end
 
-	-- Dungeon list (scroll frame)
 	local scrollFrame = CreateFrame("ScrollFrame", "AscensionDungeonMapperDungeonScroll", f, "UIPanelScrollFrameTemplate")
 	scrollFrame:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -62)
 	scrollFrame:SetWidth(226)
@@ -883,7 +795,6 @@ local function BuildMainFrame()
 	scrollFrame:SetScrollChild(content)
 	dungeonListContent = content
 
-	-- Header (selected dungeon / route info)
 	headerDungeonText = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 	headerDungeonText:SetPoint("TOPLEFT", f, "TOPLEFT", CONTENT_X, -34)
 	headerDungeonText:SetWidth(CANVAS_W)
@@ -894,8 +805,6 @@ local function BuildMainFrame()
 	headerRouteText:SetPoint("TOPLEFT", headerDungeonText, "BOTTOMLEFT", 0, -4)
 	headerRouteText:SetText("")
 
-	-- Level controls -- anchored from the frame's right edge and chained
-	-- leftward so < / > stay close together regardless of frame width.
 	levelNext = CreateActionButton(f, ">", 24)
 	levelNext:SetPoint("TOPRIGHT", f, "TOPRIGHT", -14, -34)
 	levelNext:SetScript("OnClick", function() ChangeLevel(1) end)
@@ -909,7 +818,6 @@ local function BuildMainFrame()
 	levelPrev:SetPoint("RIGHT", levelText, "LEFT", -2, 0)
 	levelPrev:SetScript("OnClick", function() ChangeLevel(-1) end)
 
-	-- Canvas
 	canvas = CreateFrame("Frame", "AscensionDungeonMapperCanvas", f)
 	canvas:SetWidth(CANVAS_W)
 	canvas:SetHeight(CANVAS_H)
@@ -924,8 +832,6 @@ local function BuildMainFrame()
 
 	local colorPicker = BuildColorPicker(canvas)
 
-	-- Toolbar: Draw/Point/Erase centered on row 1, Undo/Clear centered on
-	-- row 2 directly beneath them.
 	local TOOL_BUTTON_SIZE = 48
 	local TOOL_GAP = 6
 	local toolRowWidth = TOOL_BUTTON_SIZE * 3 + TOOL_GAP * 2
@@ -973,7 +879,6 @@ local function BuildMainFrame()
 	clearBtn:SetPoint("LEFT", undoBtn, "RIGHT", TOOL_GAP, 0)
 	clearBtn:SetScript("OnClick", function() StaticPopup_Show("ASCENSIONDUNGEONMAPPER_CONFIRM_CLEAR") end)
 
-	-- Second toolbar row: route box (left) + route management buttons (right)
 	local ROUTE_ROW_HEIGHT = 16
 	local ROUTE_BOX_WIDTH = 180
 	local toolbar2 = CreateFrame("Frame", nil, f)
@@ -1004,9 +909,6 @@ local function BuildMainFrame()
 		fs:SetJustifyH("LEFT")
 		fs:SetWidth(ROUTE_BOX_WIDTH - 16)
 		slot.text = fs
-		-- Same reasoning as the dungeon list: a wide/short row, not the
-		-- square action-button border -- use the quest-log selected-row
-		-- texture instead.
 		local selectedBar = slot:CreateTexture(nil, "OVERLAY")
 		selectedBar:SetPoint("TOPLEFT", slot, "TOPLEFT", -2, 2)
 		selectedBar:SetPoint("BOTTOMRIGHT", slot, "BOTTOMRIGHT", 2, -2)
@@ -1017,14 +919,6 @@ local function BuildMainFrame()
 		routeBoxSlots[i] = slot
 	end
 
-	-- New/Save/Delete on one row, Export/Import centered beneath them. Both
-	-- rows center within the full CANVAS_W, same as the Draw/Marker/Erase
-	-- and Undo/Clear rows above -- centering within CANVAS_W always puts a
-	-- row's midpoint at CANVAS_W/2 regardless of that row's own width, which
-	-- is what actually keeps every row's center lined up with the toolbar
-	-- above (centering each one only in the leftover space beside the route
-	-- box, as before, gave each row a different center and the visible
-	-- offset that was the point of the complaint).
 	local row1Width = 100 + 6 + 70 + 6 + 70
 	local row2Width = 80 + 6 + 80
 	local row1X = (CANVAS_W - row1Width) / 2
@@ -1034,9 +928,6 @@ local function BuildMainFrame()
 	local newBtn = CreateActionButton(toolbar2, "New Route", 100)
 	newBtn:SetPoint("TOPLEFT", toolbar2, "TOPLEFT", row1X, buttonBlockTop)
 	newBtn:SetScript("OnClick", function()
-		-- Only this button means "start over blank" -- clear here, before
-		-- naming, rather than in CreateNewRoute (which Save's no-name-yet
-		-- fallback also calls, and that path must NOT clear).
 		DR.DrawEngine.Clear()
 		StaticPopup_Show("ASCENSIONDUNGEONMAPPER_NEW_ROUTE")
 	end)
@@ -1057,7 +948,6 @@ local function BuildMainFrame()
 	importBtn:SetPoint("LEFT", exportBtn, "RIGHT", 6, 0)
 	importBtn:SetScript("OnClick", function() DR.UI.OpenImportDialog() end)
 
-	-- Credit + GitHub link, bottom-right corner of the window.
 	local creditText = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	creditText:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -30, 14)
 	creditText:SetText("Made by Gild")
@@ -1068,11 +958,9 @@ local function BuildMainFrame()
 	githubBtn:SetPoint("RIGHT", creditText, "LEFT", -6, 0)
 	local githubTex = githubBtn:CreateTexture(nil, "ARTWORK")
 	githubTex:SetAllPoints(githubBtn)
-	-- No authentic GitHub logo ships with a 3.3.5 client -- this is a
-	-- generic stand-in icon, not a real GitHub mark.
 	githubTex:SetTexture("Interface\\Icons\\INV_Misc_Note_01")
 	githubBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
-	githubBtn:SetScript("OnClick", function() StaticPopup_Show("ASCENSIONDUNGEONMAPPER_GITHUB_LINK") end)
+	githubBtn:SetScript("OnClick", OpenGithubDialog)
 	githubBtn:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
 		GameTooltip:SetText("View on GitHub", 1, 1, 1)
@@ -1087,11 +975,9 @@ local function BuildMainFrame()
 	discordBtn:SetPoint("RIGHT", githubBtn, "LEFT", -8, 0)
 	local discordTex = discordBtn:CreateTexture(nil, "ARTWORK")
 	discordTex:SetAllPoints(discordBtn)
-	-- Built-in voice-chat speaker icon -- reads as "speaker" without
-	-- needing a bundled custom texture.
 	discordTex:SetTexture("Interface\\Common\\VoiceChat-Speaker")
 	discordBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
-	discordBtn:SetScript("OnClick", function() StaticPopup_Show("ASCENSIONDUNGEONMAPPER_DISCORD_LINK") end)
+	discordBtn:SetScript("OnClick", OpenDiscordDialog)
 	discordBtn:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
 		GameTooltip:SetText("Join the Discord", 1, 1, 1)
@@ -1104,8 +990,6 @@ local function BuildMainFrame()
 	RefreshRouteBox()
 	return f
 end
-
--- Entry points -----------------------------------------------------------
 
 function DR.ToggleMainFrame()
 	if not mainFrame then

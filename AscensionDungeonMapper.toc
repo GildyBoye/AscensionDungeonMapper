@@ -1,7 +1,7 @@
 ## Interface: 33000
 ## Title: Ascension Dungeon Mapper
 ## Notes: Pick a dungeon or raid map, draw routes and add point notes, then save and share them with an export string.
-## Author: You
+## Author: Gild
 ## Version: 1.0.0
 ## SavedVariables: AscensionDungeonMapperDB
 

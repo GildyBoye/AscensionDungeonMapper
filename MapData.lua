@@ -1,13 +1,3 @@
--- AscensionDungeonMapper MapData
---
--- Static list of dungeons/raids by era. This intentionally contains NO Blizzard
--- numeric map IDs -- those are auto-discovered at runtime (see MapDiscovery.lua)
--- the first time a player walks into each instance, then cached in SavedVariables
--- and shared automatically to whoever the player shares routes with.
---
--- "key" is our own stable identifier (never changes, never depends on any
--- in-game numeric ID) used to store routes and cached map IDs.
-
 AscensionDungeonMapper = AscensionDungeonMapper or {}
 local DR = AscensionDungeonMapper
 
@@ -19,11 +9,6 @@ DR.EraLabels = {
 	WotLK = "Wrath of the Lich King",
 }
 
--- levelRange is the standard reference leveling range for each instance
--- (the same numbers you'd see on Wowhead/WowWiki, and close to what 3.3.5's
--- own Dungeon Finder tool used for the WotLK ones). Ascension's own leveling
--- pace/systems may not match 1:1 -- treat these as a rough guide, same
--- spirit as the pre-seeded map IDs.
 DR.Dungeons = {
 
 	Classic = {
@@ -35,12 +20,6 @@ DR.Dungeons = {
 		{ key = "stockade", name = "The Stockade", kind = "dungeon", levelRange = "22-30" },
 		{ key = "gnomeregan", name = "Gnomeregan", kind = "dungeon", levelRange = "24-32" },
 		{ key = "razorfenkraul", name = "Razorfen Kraul", kind = "dungeon", levelRange = "25-35" },
-		-- Scarlet Monastery's 4 wings already show as distinct map art via
-		-- the existing per-level system (numLevels=4 on this same key), so
-		-- they're split into their own list entries/route storage below
-		-- rather than needing separate map-ID discovery. This parent entry
-		-- stays for instance-name matching in MapDiscovery.lua but isn't
-		-- directly selectable.
 		{ key = "scarletmonastery", name = "Scarlet Monastery", kind = "dungeon", levelRange = "26-45", hidden = true },
 		{ key = "scarletmonastery_graveyard", name = "Scarlet Monastery: Graveyard", kind = "dungeon", levelRange = "26-32", parentKey = "scarletmonastery", level = 1 },
 		{ key = "scarletmonastery_library", name = "Scarlet Monastery: Library", kind = "dungeon", levelRange = "28-36", parentKey = "scarletmonastery", level = 2 },
@@ -54,15 +33,6 @@ DR.Dungeons = {
 		{ key = "blackrockdepths", name = "Blackrock Depths", kind = "dungeon", levelRange = "50-60" },
 		{ key = "lowerblackrockspire", name = "Lower Blackrock Spire", kind = "dungeon", levelRange = "52-60" },
 		{ key = "upperblackrockspire", name = "Upper Blackrock Spire", kind = "dungeon", levelRange = "58-60" },
-		-- Same underlying mechanism as Scarlet Monastery (one instance,
-		-- multiple map levels per key) but unlike SM it's NOT one level per
-		-- wing -- West and East each span multiple levels internally.
-		-- `level` is where selecting the wing starts you; `maxLevel` (when
-		-- present) caps how far the level control can move within that wing
-		-- before it'd be wandering into a different wing's floors. Mapping
-		-- (1=North, 2-4=West, 5-6=East) is per the user's best recollection,
-		-- not independently confirmed -- verify with /dr debug's "current
-		-- level" reading from inside each wing if routes end up misfiled.
 		{ key = "diremaul", name = "Dire Maul", kind = "dungeon", levelRange = "55-60", hidden = true },
 		{ key = "diremaul_north", name = "Dire Maul: North", kind = "dungeon", levelRange = "55-60", parentKey = "diremaul", level = 1 },
 		{ key = "diremaul_west", name = "Dire Maul: West", kind = "dungeon", levelRange = "55-60", parentKey = "diremaul", level = 2, maxLevel = 4 },
@@ -132,7 +102,6 @@ DR.Dungeons = {
 	},
 }
 
--- Build a flat lookup: key -> {name, era, kind}
 DR.DungeonByKey = {}
 for era, list in pairs(DR.Dungeons) do
 	for _, entry in ipairs(list) do
@@ -140,14 +109,6 @@ for era, list in pairs(DR.Dungeons) do
 			name = entry.name,
 			era = era,
 			kind = entry.kind,
-			-- Sub-dungeon wing entries (e.g. Scarlet Monastery's wings,
-			-- Dire Maul's wings) point at a parentKey for map data
-			-- (SetKnownMap/DefaultMapIDs) while keeping their own key for
-			-- route storage. level is where selecting the wing starts you;
-			-- maxLevel (if the wing spans more than one floor, like Dire
-			-- Maul's West/East) caps how far the level control can move
-			-- within that wing. A wing with no maxLevel is pinned to
-			-- exactly `level` (the level control doesn't apply at all).
 			parentKey = entry.parentKey,
 			level = entry.level,
 			maxLevel = entry.maxLevel,
@@ -156,8 +117,6 @@ for era, list in pairs(DR.Dungeons) do
 	end
 end
 
--- Normalize an instance name (as returned by GetInstanceInfo()) for matching
--- against our dungeon list: lowercase, strip apostrophes/punctuation/spaces.
 function DR.NormalizeName(name)
 	if not name then return "" end
 	name = name:lower()
@@ -165,37 +124,12 @@ function DR.NormalizeName(name)
 	return name
 end
 
--- Precompute normalized-name -> key lookup for auto-discovery matching.
 DR.KeyByNormalizedName = {}
 for key, info in pairs(DR.DungeonByKey) do
 	DR.KeyByNormalizedName[DR.NormalizeName(info.name)] = key
 end
 
--- DefaultMapIDs -----------------------------------------------------------
---
--- Runtime auto-discovery (MapDiscovery.lua) is the source of truth, but it
--- requires physically walking into an instance once. To let most dungeons
--- work immediately -- with zero visits required -- this table pre-seeds the
--- WorldMapAreaID for dungeons where that ID is well-documented outside of
--- this addon, so we're not the ones guessing at ~65 numbers from memory.
---
--- These are SetMapByID()-ready values (WorldMapAreaID as returned by
--- GetCurrentMapAreaID() minus 1, per this addon's convention -- see
--- MapDiscovery.lua). Cross-checked against Mapster's InstanceMaps.lua
--- (github.com/Trimitor/WDM-addons, actively used on Ascension, feeds
--- SetMapByID directly with no transform) -- a prior version of this table,
--- sourced from a different community list, was off by exactly 1 on every
--- single entry, which is why maps weren't loading. Fixed here.
---
--- Zul'Aman is omitted -- the original table's guess for it turned out to
--- collide with Serpentshrine Cavern's real (verified) ID, so it's better
--- left to MapDiscovery.lua on first visit than left in with a bad guess.
---
--- MapTexture.lua sanity-checks every one of these against GetMapInfo()
--- before trusting it, so a bad or server-specific ID just gets skipped
--- rather than silently showing the wrong dungeon's map.
 DR.DefaultMapIDs = {
-	-- Classic
 	ragefirechasm = 680,
 	deadmines = 756,
 	wailingcaverns = 749,
@@ -212,18 +146,17 @@ DR.DefaultMapIDs = {
 	sunkentemple = 687,
 	blackrockdepths = 704,
 	lowerblackrockspire = 721,
-	upperblackrockspire = 721, -- same physical map as LBRS; dungeon level differentiates
+	upperblackrockspire = 721,
 	diremaul = 699,
 	scholomance = 763,
 	stratholme = 765,
 	moltencore = 696,
 	onyxialair = 718,
 	blackwinglair = 755,
-	zulgurub = 697, -- was 792 in the old table; that wasn't off-by-1, it was just wrong
+	zulgurub = 697,
 	ruinsofahnqiraj = 717,
-	templeofahnqiraj = 766, -- was 771 in the old table; also not off-by-1
+	templeofahnqiraj = 766,
 
-	-- TBC
 	hellfireramparts = 797,
 	bloodfurnace = 725,
 	shatteredhalls = 710,
@@ -245,15 +178,10 @@ DR.DefaultMapIDs = {
 	magtheridonslair = 779,
 	serpentshrinecavern = 780,
 	tempestkeep = 782,
-	mounthyjal = 775, -- was 605 in the old table (WotLK 5-man range); also not off-by-1
+	mounthyjal = 775,
 	blacktemple = 796,
 	sunwellplateau = 789,
-	-- zulaman intentionally omitted: the old table's guess (780) turned out to
-	-- collide with Serpentshrine Cavern's real ID once Serpentshrine Cavern
-	-- was verified. No independent source for Zul'Aman -- relies on
-	-- MapDiscovery.lua the first time someone actually visits.
 
-	-- WotLK
 	utgardekeep = 523,
 	thenexus = 520,
 	azjolnerub = 533,

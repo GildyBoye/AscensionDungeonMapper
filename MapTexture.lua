@@ -1,9 +1,3 @@
--- AscensionDungeonMapper MapTexture
---
--- Renders the background of the drawing canvas: either the real 4x3 grid of
--- world-map detail tiles (the same technique the default WorldMapFrame uses),
--- or a plain placeholder grid when no map art / no known map ID exists yet.
-
 AscensionDungeonMapper = AscensionDungeonMapper or {}
 local DR = AscensionDungeonMapper
 DR.MapTexture = {}
@@ -11,8 +5,6 @@ DR.MapTexture = {}
 local TILE_COLS, TILE_ROWS = 4, 3
 local NUM_TILES = TILE_COLS * TILE_ROWS
 
--- Create (once) the 12 detail tiles plus the placeholder visuals as children
--- of canvasFrame. Safe to call multiple times; it only builds once.
 local function EnsureWidgets(canvasFrame)
 	if canvasFrame.dr_tiles then return end
 
@@ -29,7 +21,6 @@ local function EnsureWidgets(canvasFrame)
 		canvasFrame.dr_tiles[i] = tex
 	end
 
-	-- Placeholder: solid backdrop + a light grid + a message.
 	local placeholderBG = canvasFrame:CreateTexture(nil, "BACKGROUND")
 	placeholderBG:SetAllPoints(canvasFrame)
 	placeholderBG:SetTexture(0.10, 0.10, 0.12, 1)
@@ -81,14 +72,11 @@ local function HidePlaceholder(canvasFrame)
 	canvasFrame.dr_placeholderMsg:Hide()
 end
 
--- ShowEmpty(canvasFrame, message) -- for when no dungeon is selected at all.
 function DR.MapTexture.ShowEmpty(canvasFrame, message)
 	EnsureWidgets(canvasFrame)
 	ShowPlaceholder(canvasFrame, message or "Select a dungeon or raid from the list on the left.")
 end
 
--- Build(canvasFrame, dungeonKey, level)
--- Returns true if a real map is showing, false if a placeholder is showing.
 function DR.MapTexture.Build(canvasFrame, dungeonKey, level)
 	EnsureWidgets(canvasFrame)
 	level = level or 0
@@ -114,9 +102,6 @@ function DR.MapTexture.Build(canvasFrame, dungeonKey, level)
 		local usedOutsideZone = false
 
 		if not mapFileName and known.outsideZoneMapID then
-			-- This instance has no interior map art in this client. Clone the
-			-- outdoor zone's map (captured automatically when this dungeon was
-			-- first discovered) as a backdrop instead.
 			SetMapByID(known.outsideZoneMapID)
 			mapFileName = GetMapInfo()
 			dungeonLevel = 0

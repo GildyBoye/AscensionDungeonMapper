@@ -1,7 +1,3 @@
--- AscensionDungeonMapper ShareExport
--- Turns a route into a paste-able text string (and back), using our own safe
--- Serializer plus LibDeflate for compression and print-safe encoding.
-
 AscensionDungeonMapper = AscensionDungeonMapper or {}
 local DR = AscensionDungeonMapper
 DR.ShareExport = {}
@@ -19,7 +15,6 @@ local function GetLibDeflate()
 	return _G.LibDeflate
 end
 
--- Export(dungeonKey, routeName, routeData) -> string or nil, errorMessage
 function DR.ShareExport.Export(dungeonKey, routeName, routeData)
 	local LibDeflate = GetLibDeflate()
 	if not LibDeflate then
@@ -43,7 +38,6 @@ function DR.ShareExport.Export(dungeonKey, routeName, routeData)
 	return PREFIX .. encoded
 end
 
--- Import(str) -> success, dungeonKey, routeName, routeData, errorMessage
 function DR.ShareExport.Import(str)
 	local LibDeflate = GetLibDeflate()
 	if not LibDeflate then
@@ -83,7 +77,6 @@ function DR.ShareExport.Import(str)
 		return false, nil, nil, nil, "this route is for a dungeon this addon version doesn't know about"
 	end
 
-	-- Basic shape check on the route data itself.
 	package.rd.lines = package.rd.lines or {}
 	package.rd.points = package.rd.points or {}
 

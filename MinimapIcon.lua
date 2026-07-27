@@ -1,8 +1,3 @@
--- AscensionDungeonMapper MinimapIcon
--- A small draggable button on the minimap ring that toggles the main window.
--- Built by hand (no LibDBIcon/LibDataBroker dependency) since all we need is
--- a single button, not a pluggable multi-addon icon row.
-
 AscensionDungeonMapper = AscensionDungeonMapper or {}
 local DR = AscensionDungeonMapper
 
@@ -45,14 +40,10 @@ local function BuildButton()
 	icon:SetWidth(20)
 	icon:SetHeight(20)
 	icon:SetPoint("CENTER", b, "CENTER", 0, 1)
-	-- Crop the icon inward a touch so it reads cleanly inside the round border.
 	icon:SetTexture("Interface\\Icons\\INV_Misc_Map_01")
 	icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 	b.icon = icon
 
-	-- MinimapButtonBorder is the square-ish frame used for chrome like the
-	-- mail/calendar icons; the round gold ring every third-party addon's
-	-- minimap button uses (via LibDBIcon-1.0 etc.) is MiniMap-TrackingBorder.
 	local border = b:CreateTexture(nil, "OVERLAY")
 	border:SetWidth(53)
 	border:SetHeight(53)

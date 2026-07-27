@@ -1,6 +1,3 @@
--- AscensionDungeonMapper Core
--- Addon namespace, SavedVariables setup, and slash commands.
-
 AscensionDungeonMapper = AscensionDungeonMapper or {}
 local DR = AscensionDungeonMapper
 
@@ -11,35 +8,9 @@ local function Print(msg)
 end
 DR.Print = Print
 
--- Lua 5.1 has no built-in trim, and WoW's string library doesn't reliably
--- add a :trim() method across client versions, so provide our own.
 function DR.Trim(s)
 	return (s or ""):match("^%s*(.-)%s*$")
 end
-
--- AscensionDungeonMapperDB shape:
--- {
---   version = 1,
---   knownMaps = { [dungeonKey] = { mapID, numLevels, outsideZoneMapID } },
---   lastOutdoorZoneMapID = number,  -- rolling "last outdoor zone the player stood in"
---   routes = { [dungeonKey] = { [routeName] = routeData } },
--- }
---
--- outsideZoneMapID: some instances (mostly Classic/TBC ones) have no
--- dedicated interior map art in this client at all. When that's discovered,
--- we tag the dungeon with whatever outdoor zone mapID the player was
--- standing in immediately before zoning in, so MapTexture.lua can fall back
--- to cloning that zone's real map as a backdrop instead of a blank grid.
---
--- routeData shape:
--- {
---   author = "Name-Realm",
---   level = number,      -- dungeon floor this route was drawn on (0 if none)
---   created = epochTime,
---   updated = epochTime,
---   lines = { {x1,y1,x2,y2}, ... },   -- normalized 0..1 canvas coordinates
---   points = { {x=,y=,title=,text=}, ... },
--- }
 
 local function InitializeSavedVariables()
 	if type(AscensionDungeonMapperDB) ~= "table" then
@@ -61,8 +32,6 @@ function DR.SetKnownMap(dungeonKey, mapID, numLevels, outsideZoneMapID)
 	DR.db.knownMaps[dungeonKey] = {
 		mapID = mapID,
 		numLevels = numLevels or 0,
-		-- Preserve a previously-learned outside-zone fallback if this call
-		-- doesn't provide a new one (e.g. a re-discovery pass).
 		outsideZoneMapID = outsideZoneMapID or (existing and existing.outsideZoneMapID),
 	}
 end
@@ -75,16 +44,6 @@ function DR.SetLastOutdoorZoneMapID(mapID)
 	DR.db.lastOutdoorZoneMapID = mapID
 end
 
--- Several places need to temporarily point the (global, client-wide) world
--- map at an arbitrary mapID to read GetMapInfo()/GetNumDungeonMapLevels(),
--- then put it back exactly how they found it -- these are the same global
--- setters the real WorldMapFrame uses. This runs fn() in between save and
--- restore.
---
--- Returns skipped, ...(fn's return values). skipped is true if fn() didn't
--- run at all because the real WorldMapFrame is currently open (repointing
--- it would visibly flicker the player's own map); callers should treat that
--- as "try again later", not as "there's no map data".
 function DR.WithSavedMapState(fn)
 	if WorldMapFrame and WorldMapFrame:IsShown() then
 		return true, nil
@@ -128,8 +87,6 @@ function DR.DeleteRoute(dungeonKey, routeName)
 	end
 end
 
--- Event handling ------------------------------------------------------------
-
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:SetScript("OnEvent", function(self, event, addonName)
@@ -141,8 +98,6 @@ eventFrame:SetScript("OnEvent", function(self, event, addonName)
 		end
 	end
 end)
-
--- Slash commands --------------------------------------------------------
 
 SLASH_ASCENSIONDUNGEONMAPPER1 = "/adm"
 SLASH_ASCENSIONDUNGEONMAPPER2 = "/dungeonmapper"
@@ -165,9 +120,6 @@ SlashCmdList["ASCENSIONDUNGEONMAPPER"] = function(msg)
 		local key = DR.KeyByNormalizedName[DR.NormalizeName(name)]
 		local cached = key and DR.GetKnownMap(key)
 		local defaultID = key and DR.DefaultMapIDs[key]
-		-- currentLevel is the ground truth for "which wing/level am I
-		-- physically standing in right now" -- useful for confirming which
-		-- numbered level a multi-wing dungeon's wing actually corresponds to.
 		Print(("Instance: %s | key: %s | live mapID: %d | cached mapID: %s | DefaultMapIDs: %s | dungeon levels: %d | current level: %d"):format(
 			name, key or "(unmatched)", liveID,
 			cached and tostring(cached.mapID) or "none",

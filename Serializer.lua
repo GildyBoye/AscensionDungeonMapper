@@ -1,22 +1,3 @@
--- AscensionDungeonMapper Serializer
---
--- Import strings come from OTHER PLAYERS and must be treated as untrusted input.
--- We never use loadstring()/load() on them. Instead this is a small hand-written
--- recursive-descent encoder/decoder for a limited set of value types:
--- nil, true, false, numbers, strings, and nested tables (used as arrays or maps).
---
--- Wire format (no delimiters that need escaping -- everything is length-prefixed):
---   nil    -> "n"
---   true   -> "T"
---   false  -> "F"
---   number -> "N" <tostring(number)> ";"
---   string -> "S" <byte length> ":" <raw bytes>
---   table  -> "{" <entry count> ":" (key value)*count "}"
---
--- Table keys/values are themselves encoded with the same rules, so tables can
--- nest arbitrarily. This intentionally cannot represent functions, userdata,
--- or non-serializable values -- which is exactly what we want for shared data.
-
 AscensionDungeonMapper = AscensionDungeonMapper or {}
 local DR = AscensionDungeonMapper
 
@@ -34,7 +15,6 @@ local function encodeValue(value, parts)
 	elseif t == "string" then
 		parts[#parts + 1] = "S" .. #value .. ":" .. value
 	elseif t == "table" then
-		-- Collect entries first so we know the count.
 		local entryParts = {}
 		local count = 0
 		for k, v in pairs(value) do
@@ -52,15 +32,12 @@ local function encodeValue(value, parts)
 	end
 end
 
--- Serialize(value) -> string
 function Serializer:Serialize(value)
 	local parts = {}
 	encodeValue(value, parts)
 	return table.concat(parts)
 end
 
--- Internal: decode one value starting at str[pos], return value, nextPos.
--- Throws (via error()) on any malformed input; callers must wrap in pcall.
 local function decodeValue(str, pos)
 	local tag = str:sub(pos, pos)
 	if tag == "n" then
@@ -108,7 +85,6 @@ local function decodeValue(str, pos)
 	end
 end
 
--- Deserialize(str) -> success(bool), value_or_errorMessage
 function Serializer:Deserialize(str)
 	if type(str) ~= "string" or str == "" then
 		return false, "empty input"
