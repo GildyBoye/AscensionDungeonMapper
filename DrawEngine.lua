@@ -25,6 +25,29 @@ function Draw.SetLineColor(r, g, b)
 	currentLineColor = { r, g, b, DEFAULT_LINE_COLOR[4] }
 end
 
+local function ColorToIndex(color)
+	for i, c in ipairs(LINE_COLORS) do
+		if c[1] == color[1] and c[2] == color[2] and c[3] == color[3] then
+			return i
+		end
+	end
+	return nil
+end
+
+local COORD_SCALE = 10000
+
+local function QuantizeCoord(v)
+	return math.floor(v * COORD_SCALE + 0.5)
+end
+
+local function UnquantizeCoord(v)
+	return v / COORD_SCALE
+end
+
+local function IsQuantizedCoord(v)
+	return v > 1
+end
+
 local MIN_SEGMENT_DIST = 0.008
 
 local ERASE_TOLERANCE_PX = 6
@@ -327,10 +350,23 @@ end
 function Draw.GetRouteData()
 	local lines, points = {}, {}
 	for _, l in ipairs(lineWidgets) do
-		lines[#lines + 1] = { l.x1, l.y1, l.x2, l.y2, l.color[1], l.color[2], l.color[3] }
+		local entry = {
+			QuantizeCoord(l.x1), QuantizeCoord(l.y1),
+			QuantizeCoord(l.x2), QuantizeCoord(l.y2),
+		}
+		local colorIndex = ColorToIndex(l.color)
+		if colorIndex then
+			entry[5] = colorIndex
+		else
+			entry[5], entry[6], entry[7] = l.color[1], l.color[2], l.color[3]
+		end
+		lines[#lines + 1] = entry
 	end
 	for _, p in ipairs(pointWidgets) do
-		points[#points + 1] = { x = p.x, y = p.y, title = p.title, text = p.text, icon = p.icon }
+		points[#points + 1] = {
+			x = QuantizeCoord(p.x), y = QuantizeCoord(p.y),
+			title = p.title, text = p.text, icon = p.icon,
+		}
 	end
 	return lines, points
 end
@@ -338,10 +374,24 @@ end
 function Draw.LoadRouteData(lines, points)
 	Draw.Clear()
 	for _, l in ipairs(lines or {}) do
-		local color = l[5] and { l[5], l[6], l[7], DEFAULT_LINE_COLOR[4] } or nil
-		CreateLineWidget(l[1], l[2], l[3], l[4], AllocateStrokeId(), color)
+		local x1, y1, x2, y2 = l[1], l[2], l[3], l[4]
+		if IsQuantizedCoord(x1) or IsQuantizedCoord(y1) or IsQuantizedCoord(x2) or IsQuantizedCoord(y2) then
+			x1, y1, x2, y2 = UnquantizeCoord(x1), UnquantizeCoord(y1), UnquantizeCoord(x2), UnquantizeCoord(y2)
+		end
+		local color
+		if l[6] and l[7] then
+			color = { l[5], l[6], l[7], DEFAULT_LINE_COLOR[4] }
+		elseif l[5] and LINE_COLORS[l[5]] then
+			local c = LINE_COLORS[l[5]]
+			color = { c[1], c[2], c[3], DEFAULT_LINE_COLOR[4] }
+		end
+		CreateLineWidget(x1, y1, x2, y2, AllocateStrokeId(), color)
 	end
 	for _, p in ipairs(points or {}) do
-		CreatePointWidget(p.x, p.y, p.title, p.text, p.icon)
+		local x, y = p.x, p.y
+		if IsQuantizedCoord(x) or IsQuantizedCoord(y) then
+			x, y = UnquantizeCoord(x), UnquantizeCoord(y)
+		end
+		CreatePointWidget(x, y, p.title, p.text, p.icon)
 	end
 end

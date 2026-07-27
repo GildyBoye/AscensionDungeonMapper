@@ -33,7 +33,7 @@ function DR.ShareExport.Export(dungeonKey, routeName, routeData)
 		return nil, "failed to serialize route: " .. tostring(serialized)
 	end
 
-	local compressed = LibDeflate:CompressDeflate(serialized, { level = 5 })
+	local compressed = LibDeflate:CompressDeflate(serialized, { level = 9 })
 	local encoded = LibDeflate:EncodeForPrint(compressed)
 	return PREFIX .. encoded
 end
