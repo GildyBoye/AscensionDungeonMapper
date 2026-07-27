@@ -378,6 +378,14 @@ end
 -- Each dungeon (or wing, for split entries like Scarlet Monastery) gets up
 -- to MAX_ROUTES_PER_DUNGEON saved routes, shown as fixed slots in the route
 -- box -- renaming/overwriting an existing route doesn't count against the cap.
+--
+-- This is shared by two different callers with two different intents: the
+-- "New Route" button (wants a genuinely blank canvas under the new name --
+-- that button clears the canvas itself, before this ever runs) and Save's
+-- fallback when no route is named yet (the user has very likely already
+-- drawn something -- e.g. picked a dungeon and started drawing immediately
+-- without naming a route first -- and just wants it saved under a name, not
+-- wiped). So this function itself must never clear the canvas.
 function DR.UI.CreateNewRoute(name)
 	name = DR.Trim(name)
 	if name == "" then
@@ -397,7 +405,6 @@ function DR.UI.CreateNewRoute(name)
 			return
 		end
 	end
-	DR.DrawEngine.Clear()
 	currentRouteName = name
 	SaveCurrentRoute()
 end
@@ -608,13 +615,34 @@ StaticPopupDialogs["ASCENSIONDUNGEONMAPPER_NEW_ROUTE"] = {
 	hideOnEscape = true,
 }
 
-StaticPopupDialogs["ASCENSIONDUNGEONMAPPER_EXPORT"] = {
-	text = "%s\nCtrl+A then Ctrl+C to copy:",
+-- 3.3.5 has no API to open a browser, so "linking" to GitHub/Discord means
+-- the same thing Export does: show the URL in a copyable edit box.
+local GITHUB_URL = "https://github.com/GildyBoye/AscensionDungeonMapper"
+local DISCORD_URL = "https://discord.com/invite/mQjgHCW"
+
+StaticPopupDialogs["ASCENSIONDUNGEONMAPPER_GITHUB_LINK"] = {
+	text = "AscensionDungeonMapper on GitHub\nCtrl+A then Ctrl+C to copy:",
 	button1 = CLOSE,
 	hasEditBox = true,
 	editBoxWidth = 350,
 	OnShow = function(self)
-		self.editBox:SetText(self.data)
+		self.editBox:SetText(GITHUB_URL)
+		self.editBox:HighlightText()
+		self.editBox:SetFocus()
+	end,
+	EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
+	timeout = 0,
+	whileDead = true,
+	hideOnEscape = true,
+}
+
+StaticPopupDialogs["ASCENSIONDUNGEONMAPPER_DISCORD_LINK"] = {
+	text = "Join the Discord\nCtrl+A then Ctrl+C to copy:",
+	button1 = CLOSE,
+	hasEditBox = true,
+	editBoxWidth = 350,
+	OnShow = function(self)
+		self.editBox:SetText(DISCORD_URL)
 		self.editBox:HighlightText()
 		self.editBox:SetFocus()
 	end,
@@ -629,25 +657,6 @@ StaticPopupDialogs["ASCENSIONDUNGEONMAPPER_CONFIRM_CLEAR"] = {
 	button1 = "Clear",
 	button2 = CANCEL,
 	OnAccept = function() DR.DrawEngine.Clear() end,
-	timeout = 0,
-	whileDead = true,
-	hideOnEscape = true,
-}
-
-StaticPopupDialogs["ASCENSIONDUNGEONMAPPER_IMPORT"] = {
-	text = "Paste a AscensionDungeonMapper share string:",
-	button1 = "Import",
-	button2 = CANCEL,
-	hasEditBox = true,
-	editBoxWidth = 350,
-	OnAccept = function(self)
-		DR.UI.HandleImport(self.editBox:GetText())
-	end,
-	EditBoxOnEnterPressed = function(self)
-		DR.UI.HandleImport(self:GetText())
-		self:GetParent():Hide()
-	end,
-	EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
 	timeout = 0,
 	whileDead = true,
 	hideOnEscape = true,
@@ -680,6 +689,81 @@ function DR.UI.HandleImport(text)
 	DR.Print("Imported route '" .. routeName .. "' for " .. info.name .. ".")
 end
 
+-- Export/Import text dialogs. StaticPopup's built-in edit box is single-line
+-- and only 350px wide -- fine for a short URL, but a compressed route string
+-- can run to hundreds or thousands of characters, and having it all scroll
+-- sideways inside a tiny box makes it hard to trust a Ctrl+A actually
+-- grabbed everything. These give a real multi-line scrollable box instead.
+local TEXT_DIALOG_W, TEXT_DIALOG_H = 520, 360
+
+local function BuildTextDialog(name, title)
+	local f = CreateBorderedFrame(name, UIParent, TEXT_DIALOG_W, TEXT_DIALOG_H, title)
+	f:SetPoint("CENTER")
+	f:SetFrameStrata("DIALOG")
+	f:Hide()
+
+	local hint = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	hint:SetPoint("TOP", f, "TOP", 0, -32)
+	f.hint = hint
+
+	local scrollFrame = CreateFrame("ScrollFrame", name .. "Scroll", f, "UIPanelScrollFrameTemplate")
+	scrollFrame:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -54)
+	scrollFrame:SetWidth(TEXT_DIALOG_W - 50)
+	scrollFrame:SetHeight(TEXT_DIALOG_H - 100)
+
+	local editBox = CreateFrame("EditBox", nil, scrollFrame)
+	editBox:SetMultiLine(true)
+	editBox:SetFontObject(ChatFontNormal)
+	editBox:SetWidth(TEXT_DIALOG_W - 50)
+	editBox:SetHeight(TEXT_DIALOG_H - 100)
+	editBox:SetAutoFocus(false)
+	editBox:SetScript("OnEscapePressed", function(self) self:GetParent():GetParent():Hide() end)
+	scrollFrame:SetScrollChild(editBox)
+	f.editBox = editBox
+
+	return f
+end
+
+local exportDialog
+local function OpenExportDialog(title, str)
+	if not exportDialog then
+		exportDialog = BuildTextDialog("AscensionDungeonMapperExportDialog", "Export Route")
+		exportDialog.hint:SetText("Ctrl+A then Ctrl+C to copy the whole string:")
+
+		local closeBtn = CreateActionButton(exportDialog, "Close", 80)
+		closeBtn:SetPoint("BOTTOMRIGHT", exportDialog, "BOTTOMRIGHT", -14, 14)
+		closeBtn:SetScript("OnClick", function() exportDialog:Hide() end)
+	end
+	exportDialog.titleText:SetText(title)
+	exportDialog.editBox:SetText(str)
+	exportDialog:Show()
+	exportDialog.editBox:HighlightText()
+	exportDialog.editBox:SetFocus()
+end
+
+local importDialog
+local function OpenImportDialog()
+	if not importDialog then
+		importDialog = BuildTextDialog("AscensionDungeonMapperImportDialog", "Import Route")
+		importDialog.hint:SetText("Paste a share string, then click Import:")
+
+		local importBtn = CreateActionButton(importDialog, "Import", 80)
+		importBtn:SetPoint("BOTTOMLEFT", importDialog, "BOTTOMLEFT", 14, 14)
+		importBtn:SetScript("OnClick", function()
+			DR.UI.HandleImport(importDialog.editBox:GetText())
+			importDialog:Hide()
+		end)
+
+		local cancelBtn = CreateActionButton(importDialog, "Cancel", 80)
+		cancelBtn:SetPoint("BOTTOMRIGHT", importDialog, "BOTTOMRIGHT", -14, 14)
+		cancelBtn:SetScript("OnClick", function() importDialog:Hide() end)
+	end
+	importDialog.editBox:SetText("")
+	importDialog:Show()
+	importDialog.editBox:SetFocus()
+end
+DR.UI.OpenImportDialog = OpenImportDialog
+
 local function ExportCurrent()
 	if not currentDungeonKey then
 		DR.Print("Select a dungeon first.")
@@ -700,7 +784,7 @@ local function ExportCurrent()
 		DR.Print("Export failed: " .. tostring(err))
 		return
 	end
-	StaticPopup_Show("ASCENSIONDUNGEONMAPPER_EXPORT", "Share string for \"" .. name .. "\"", nil, str)
+	OpenExportDialog("Share string for \"" .. name .. "\"", str)
 end
 
 -- Draw-tool color picker: a small floating swatch row over the bottom of
@@ -933,19 +1017,29 @@ local function BuildMainFrame()
 		routeBoxSlots[i] = slot
 	end
 
-	-- New/Save/Delete on one row, Export/Import centered beneath them, both
-	-- rows centered within the space to the right of the route box.
-	local routeButtonsAreaX = ROUTE_BOX_WIDTH + 16
-	local routeButtonsAreaWidth = CANVAS_W - routeButtonsAreaX
+	-- New/Save/Delete on one row, Export/Import centered beneath them. Both
+	-- rows center within the full CANVAS_W, same as the Draw/Marker/Erase
+	-- and Undo/Clear rows above -- centering within CANVAS_W always puts a
+	-- row's midpoint at CANVAS_W/2 regardless of that row's own width, which
+	-- is what actually keeps every row's center lined up with the toolbar
+	-- above (centering each one only in the leftover space beside the route
+	-- box, as before, gave each row a different center and the visible
+	-- offset that was the point of the complaint).
 	local row1Width = 100 + 6 + 70 + 6 + 70
 	local row2Width = 80 + 6 + 80
-	local row1X = routeButtonsAreaX + (routeButtonsAreaWidth - row1Width) / 2
-	local row2X = routeButtonsAreaX + (routeButtonsAreaWidth - row2Width) / 2
+	local row1X = (CANVAS_W - row1Width) / 2
+	local row2X = (CANVAS_W - row2Width) / 2
 	local buttonBlockTop = -(toolbar2:GetHeight() - (22 + 6 + 22)) / 2
 
 	local newBtn = CreateActionButton(toolbar2, "New Route", 100)
 	newBtn:SetPoint("TOPLEFT", toolbar2, "TOPLEFT", row1X, buttonBlockTop)
-	newBtn:SetScript("OnClick", function() StaticPopup_Show("ASCENSIONDUNGEONMAPPER_NEW_ROUTE") end)
+	newBtn:SetScript("OnClick", function()
+		-- Only this button means "start over blank" -- clear here, before
+		-- naming, rather than in CreateNewRoute (which Save's no-name-yet
+		-- fallback also calls, and that path must NOT clear).
+		DR.DrawEngine.Clear()
+		StaticPopup_Show("ASCENSIONDUNGEONMAPPER_NEW_ROUTE")
+	end)
 
 	local saveBtn = CreateActionButton(toolbar2, "Save", 70)
 	saveBtn:SetPoint("LEFT", newBtn, "RIGHT", 6, 0)
@@ -961,7 +1055,50 @@ local function BuildMainFrame()
 
 	local importBtn = CreateActionButton(toolbar2, "Import", 80)
 	importBtn:SetPoint("LEFT", exportBtn, "RIGHT", 6, 0)
-	importBtn:SetScript("OnClick", function() StaticPopup_Show("ASCENSIONDUNGEONMAPPER_IMPORT") end)
+	importBtn:SetScript("OnClick", function() DR.UI.OpenImportDialog() end)
+
+	-- Credit + GitHub link, bottom-right corner of the window.
+	local creditText = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	creditText:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -30, 14)
+	creditText:SetText("Made by Gild")
+
+	local githubBtn = CreateFrame("Button", nil, f)
+	githubBtn:SetWidth(16)
+	githubBtn:SetHeight(16)
+	githubBtn:SetPoint("RIGHT", creditText, "LEFT", -6, 0)
+	local githubTex = githubBtn:CreateTexture(nil, "ARTWORK")
+	githubTex:SetAllPoints(githubBtn)
+	-- No authentic GitHub logo ships with a 3.3.5 client -- this is a
+	-- generic stand-in icon, not a real GitHub mark.
+	githubTex:SetTexture("Interface\\Icons\\INV_Misc_Note_01")
+	githubBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+	githubBtn:SetScript("OnClick", function() StaticPopup_Show("ASCENSIONDUNGEONMAPPER_GITHUB_LINK") end)
+	githubBtn:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:SetText("View on GitHub", 1, 1, 1)
+		GameTooltip:AddLine(GITHUB_URL, 0.6, 0.8, 1, true)
+		GameTooltip:Show()
+	end)
+	githubBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+	local discordBtn = CreateFrame("Button", nil, f)
+	discordBtn:SetWidth(16)
+	discordBtn:SetHeight(16)
+	discordBtn:SetPoint("RIGHT", githubBtn, "LEFT", -8, 0)
+	local discordTex = discordBtn:CreateTexture(nil, "ARTWORK")
+	discordTex:SetAllPoints(discordBtn)
+	-- Built-in voice-chat speaker icon -- reads as "speaker" without
+	-- needing a bundled custom texture.
+	discordTex:SetTexture("Interface\\Common\\VoiceChat-Speaker")
+	discordBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+	discordBtn:SetScript("OnClick", function() StaticPopup_Show("ASCENSIONDUNGEONMAPPER_DISCORD_LINK") end)
+	discordBtn:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:SetText("Join the Discord", 1, 1, 1)
+		GameTooltip:AddLine(DISCORD_URL, 0.6, 0.8, 1, true)
+		GameTooltip:Show()
+	end)
+	discordBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
 	SetModeButtonHighlight(nil)
 	RefreshRouteBox()
