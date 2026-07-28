@@ -16,6 +16,8 @@ local currentEra = "Classic"
 local currentDungeonKey = nil
 local currentLevel = 0
 local currentRouteName = nil
+local dirty = false
+local pendingDiscardAction
 
 local headerDungeonText, headerRouteText, levelText, levelPrev, levelNext
 local pointEditorFrame
@@ -109,13 +111,27 @@ local function SetModeButtonHighlight(activeMode)
 	end
 end
 
-local function SelectDungeon(key)
+-- If there's an unsaved edit sitting on the canvas, defers `action` behind a
+-- confirmation popup instead of just letting it get silently discarded by
+-- whatever's about to clear/replace the canvas (switching dungeons,
+-- starting a new route, accepting an imported/shared route).
+local function ConfirmIfDirty(action)
+	if dirty then
+		pendingDiscardAction = action
+		StaticPopup_Show("ASCENSIONDUNGEONMAPPER_CONFIRM_DISCARD")
+	else
+		action()
+	end
+end
+
+local function DoSelectDungeonNow(key)
 	currentDungeonKey = key
 	local info = DR.DungeonByKey[key]
 	local mapKey = info.parentKey or key
 	local known = DR.GetKnownMap(mapKey)
 	currentLevel = info.level or ((known and known.numLevels and known.numLevels > 0) and 1 or 0)
 	currentRouteName = nil
+	dirty = false
 
 	headerDungeonText:SetText(info.name)
 	headerRouteText:SetText("(no route loaded)")
@@ -144,6 +160,16 @@ local function SelectDungeon(key)
 	end
 
 	RefreshRouteBox()
+end
+
+-- `onComplete` runs after the switch actually happens -- callers that need
+-- to do something right after (like loading a specific route) can't just
+-- run it inline anymore, since this may now be waiting on a confirm popup.
+local function SelectDungeon(key, onComplete)
+	ConfirmIfDirty(function()
+		DoSelectDungeonNow(key)
+		if onComplete then onComplete() end
+	end)
 end
 
 local HEADER_ROW_HEIGHT = 16
@@ -232,16 +258,24 @@ function RefreshDungeonList()
 	dungeonListContent:SetHeight(math.max(yOffset, 1))
 end
 
-local function SetEra(era)
+local function DoSetEraNow(era)
 	currentEra = era
 	currentDungeonKey = nil
 	currentRouteName = nil
+	dirty = false
 	headerDungeonText:SetText("Select a dungeon or raid on the left")
 	headerRouteText:SetText("")
 	DR.DrawEngine.Clear()
 	DR.MapTexture.ShowEmpty(canvas)
 	RefreshDungeonList()
 	RefreshRouteBox()
+end
+
+local function SetEra(era, onComplete)
+	ConfirmIfDirty(function()
+		DoSetEraNow(era)
+		if onComplete then onComplete() end
+	end)
 end
 
 local function WingLevelRange(info)
@@ -287,18 +321,24 @@ local function ChangeLevel(delta)
 end
 
 function DR.UI.LoadRoute(name)
-	if not currentDungeonKey then return end
-	local routes = DR.GetRoutesForDungeon(currentDungeonKey)
-	local data = routes[name]
-	if not data then return end
-	local info = DR.DungeonByKey[currentDungeonKey]
-	currentRouteName = name
-	currentLevel = data.level or info.level or 0
-	DR.MapTexture.Build(canvas, info.parentKey or currentDungeonKey, currentLevel)
-	DR.DrawEngine.LoadRouteData(data.lines, data.points)
-	DR.UI.UpdateLevelDisplay()
-	headerRouteText:SetText("Route: " .. name .. " (by " .. (data.author or "?") .. ")")
-	RefreshRouteBox()
+	-- Guarded for the direct "click a different saved route" path; the two
+	-- internal callers (DoSelectDungeonNow, ImportParsedRoute) always reach
+	-- this with dirty already false, so this never double-prompts them.
+	ConfirmIfDirty(function()
+		if not currentDungeonKey then return end
+		local routes = DR.GetRoutesForDungeon(currentDungeonKey)
+		local data = routes[name]
+		if not data then return end
+		local info = DR.DungeonByKey[currentDungeonKey]
+		currentRouteName = name
+		currentLevel = data.level or info.level or 0
+		dirty = false
+		DR.MapTexture.Build(canvas, info.parentKey or currentDungeonKey, currentLevel)
+		DR.DrawEngine.LoadRouteData(data.lines, data.points)
+		DR.UI.UpdateLevelDisplay()
+		headerRouteText:SetText("Route: " .. name .. " (by " .. (data.author or "?") .. ")")
+		RefreshRouteBox()
+	end)
 end
 
 local function SaveCurrentRoute(silent)
@@ -323,6 +363,7 @@ local function SaveCurrentRoute(silent)
 		points = points,
 	}
 	DR.SaveRoute(currentDungeonKey, currentRouteName, routeData)
+	dirty = false
 	headerRouteText:SetText("Route: " .. currentRouteName .. " (saved)")
 	if not silent then
 		DR.Print("Saved route '" .. currentRouteName .. "'.")
@@ -546,6 +587,7 @@ local function BuildPointEditor()
 			editingEntry.title = f.titleBox:GetText()
 			editingEntry.text = f.descBox:GetText()
 			editingEntry.SetIcon(f.iconRow.selected)
+			dirty = true
 			MaybeAutoSave()
 		end
 		f:Hide()
@@ -555,8 +597,7 @@ local function BuildPointEditor()
 	deleteBtn:SetPoint("LEFT", saveBtn, "RIGHT", 8, 0)
 	deleteBtn:SetScript("OnClick", function()
 		if editingEntry then
-			DR.DrawEngine.RemovePoint(editingEntry)
-			MaybeAutoSave()
+			DR.DrawEngine.DeletePoint(editingEntry)
 		end
 		f:Hide()
 	end)
@@ -579,6 +620,21 @@ local function OpenPointEditor(entry)
 	pointEditorFrame:Show()
 	pointEditorFrame.titleBox:SetFocus()
 end
+
+StaticPopupDialogs["ASCENSIONDUNGEONMAPPER_CONFIRM_DISCARD"] = {
+	text = "You have unsaved changes. Continue and lose them?",
+	button1 = "Continue",
+	button2 = CANCEL,
+	OnAccept = function()
+		local action = pendingDiscardAction
+		pendingDiscardAction = nil
+		if action then action() end
+	end,
+	OnCancel = function() pendingDiscardAction = nil end,
+	timeout = 0,
+	whileDead = true,
+	hideOnEscape = true,
+}
 
 StaticPopupDialogs["ASCENSIONDUNGEONMAPPER_NEW_ROUTE"] = {
 	text = "Name this route:",
@@ -631,6 +687,7 @@ StaticPopupDialogs["ASCENSIONDUNGEONMAPPER_CONFIRM_CLEAR"] = {
 	button2 = CANCEL,
 	OnAccept = function()
 		DR.DrawEngine.Clear()
+		dirty = true
 		MaybeAutoSave()
 	end,
 	timeout = 0,
@@ -667,10 +724,18 @@ function DR.UI.ImportParsedRoute(dungeonKey, routeName, routeData, sourceLabel)
 	DR.SaveRoute(dungeonKey, routeName, routeData)
 
 	local info = DR.DungeonByKey[dungeonKey]
-	SetEra(info.era)
-	SelectDungeon(dungeonKey)
-	DR.UI.LoadRoute(routeName)
-	DR.Print(("Imported route '%s' for %s%s."):format(routeName, info.name, sourceLabel and (" " .. sourceLabel) or ""))
+	-- SetEra and SelectDungeon can each defer behind their own
+	-- unsaved-changes confirm popup, so this has to chain as continuations
+	-- rather than run inline -- and SetEra must go first and actually
+	-- finish (resetting dirty) before SelectDungeon's own check runs,
+	-- otherwise SelectDungeon could prompt again after the era switch
+	-- already discarded whatever was open.
+	SetEra(info.era, function()
+		SelectDungeon(dungeonKey, function()
+			DR.UI.LoadRoute(routeName)
+			DR.Print(("Imported route '%s' for %s%s."):format(routeName, info.name, sourceLabel and (" " .. sourceLabel) or ""))
+		end)
+	end)
 	return true
 end
 
@@ -1170,7 +1235,10 @@ local function BuildMainFrame()
 
 	DR.DrawEngine.Init(canvas)
 	DR.DrawEngine.onPointClick = OpenPointEditor
-	DR.DrawEngine.onChange = MaybeAutoSave
+	DR.DrawEngine.onChange = function()
+		dirty = true
+		MaybeAutoSave()
+	end
 
 	local colorPicker = BuildColorPicker(canvas)
 
@@ -1297,8 +1365,11 @@ local function BuildMainFrame()
 	local newBtn = CreateActionButton(toolbar2, "New Route", 100)
 	newBtn:SetPoint("TOPLEFT", toolbar2, "TOPLEFT", row1X, buttonBlockTop)
 	newBtn:SetScript("OnClick", function()
-		DR.DrawEngine.Clear()
-		StaticPopup_Show("ASCENSIONDUNGEONMAPPER_NEW_ROUTE")
+		ConfirmIfDirty(function()
+			DR.DrawEngine.Clear()
+			dirty = false
+			StaticPopup_Show("ASCENSIONDUNGEONMAPPER_NEW_ROUTE")
+		end)
 	end)
 
 	local saveBtn = CreateActionButton(toolbar2, "Save", 70)

@@ -297,14 +297,9 @@ local function CreatePointWidget(x, y, title, text, icon)
 	frame:SetScript("OnClick", function(self)
 		if mode == "erase" then
 			-- A direct click on the point's own button bypasses the canvas's
-			-- drag-erase session entirely, so record its own one-item erase
-			-- entry here to keep Undo consistent regardless of which path
-			-- removed it.
-			history[#history + 1] = { kind = "erase", lines = {}, points = {
-				{ x = entry.x, y = entry.y, title = entry.title, text = entry.text, icon = entry.icon },
-			} }
-			Draw.RemovePoint(entry)
-			if Draw.onChange then Draw.onChange() end
+			-- drag-erase session entirely, so this goes through DeletePoint
+			-- to keep Undo consistent regardless of which path removed it.
+			Draw.DeletePoint(entry)
 		elseif Draw.onPointClick then
 			Draw.onPointClick(entry)
 		end
@@ -428,6 +423,18 @@ function Draw.RemovePoint(entry)
 			table.remove(history, i)
 		end
 	end
+end
+
+-- Removes a point WITH an undo-able history entry and an onChange
+-- notification -- the one true way to delete a single point, shared by the
+-- erase-mode direct click and the point editor's Delete Marker button, so
+-- both behave identically (a plain Draw.RemovePoint call bypasses undo).
+function Draw.DeletePoint(entry)
+	history[#history + 1] = { kind = "erase", lines = {}, points = {
+		{ x = entry.x, y = entry.y, title = entry.title, text = entry.text, icon = entry.icon },
+	} }
+	Draw.RemovePoint(entry)
+	if Draw.onChange then Draw.onChange() end
 end
 
 function Draw.RemoveStrokeById(strokeId)

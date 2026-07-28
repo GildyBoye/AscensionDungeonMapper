@@ -6,6 +6,7 @@ local Share = DR.ShareChat
 local ADDON_PREFIX = "ADMShare"
 local CHUNK_SIZE = 200
 local RATE_LIMIT_SECONDS = 3
+local ANNOUNCE_RATE_LIMIT_SECONDS = 5
 local REQUEST_TIMEOUT_SECONDS = 10
 local MAX_CONCURRENT_REQUESTS = 3
 local MAX_CLAIMED_CHUNKS = 50
@@ -19,6 +20,7 @@ Share.onShareAnnounced = nil
 local pendingShares = {}
 local shareOrder = {}
 local lastFulfilledFrom = {}
+local lastAnnouncedFrom = {}
 
 math.randomseed(time())
 
@@ -214,6 +216,11 @@ function Share.HandleAddonMessage(sender, message)
 		local shareID, reason = message:match("^ERR:([^:]+):(.*)$")
 		if shareID then Share.ReceiveError(sender, shareID, reason) end
 	elseif kind == "ANN" then
+		local now = time()
+		if lastAnnouncedFrom[sender] and now - lastAnnouncedFrom[sender] < ANNOUNCE_RATE_LIMIT_SECONDS then
+			return
+		end
+		lastAnnouncedFrom[sender] = now
 		local shareID, dungeonKey, routeName = message:match("^ANN:([^:]+):([^:]+):(.*)$")
 		if shareID and dungeonKey and Share.onShareAnnounced then
 			Share.onShareAnnounced(sender, shareID, dungeonKey, routeName)
