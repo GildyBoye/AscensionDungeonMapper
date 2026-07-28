@@ -301,7 +301,7 @@ function DR.UI.LoadRoute(name)
 	RefreshRouteBox()
 end
 
-local function SaveCurrentRoute()
+local function SaveCurrentRoute(silent)
 	if not currentDungeonKey then
 		DR.Print("Select a dungeon first.")
 		return
@@ -324,8 +324,16 @@ local function SaveCurrentRoute()
 	}
 	DR.SaveRoute(currentDungeonKey, currentRouteName, routeData)
 	headerRouteText:SetText("Route: " .. currentRouteName .. " (saved)")
-	DR.Print("Saved route '" .. currentRouteName .. "'.")
+	if not silent then
+		DR.Print("Saved route '" .. currentRouteName .. "'.")
+	end
 	RefreshRouteBox()
+end
+
+local function MaybeAutoSave()
+	if DR.db.autoSave and currentDungeonKey and currentRouteName then
+		SaveCurrentRoute(true)
+	end
 end
 
 function DR.UI.CreateNewRoute(name)
@@ -361,6 +369,32 @@ local function DeleteCurrentRoute()
 	RefreshRouteBox()
 end
 
+function DR.UI.RenameCurrentRoute(newName)
+	newName = DR.Trim(newName)
+	if not currentDungeonKey or not currentRouteName then
+		DR.Print("No route loaded to rename.")
+		return
+	end
+	if newName == "" then
+		DR.Print("Route name can't be empty.")
+		return
+	end
+	if newName == currentRouteName then return end
+	local routes = DR.GetRoutesForDungeon(currentDungeonKey)
+	if routes[newName] then
+		DR.Print("A route named '" .. newName .. "' already exists.")
+		return
+	end
+	if not DR.RenameRoute(currentDungeonKey, currentRouteName, newName) then
+		DR.Print("Rename failed.")
+		return
+	end
+	currentRouteName = newName
+	headerRouteText:SetText("Route: " .. newName .. " (saved)")
+	DR.Print("Renamed route to '" .. newName .. "'.")
+	RefreshRouteBox()
+end
+
 function RefreshRouteBox()
 	if #routeBoxSlots == 0 then return end
 	local routes = currentDungeonKey and DR.GetRoutesForDungeon(currentDungeonKey) or {}
@@ -389,19 +423,25 @@ end
 local editingEntry
 
 local ICON_PICKER_SIZE = 24
+local ICONS_PER_ROW = 10
 
-local function MakeIconButton(iconRow, index, iconValue, texturePath)
+local function MakeIconButton(iconRow, col, row, iconValue, def)
 	local btn = CreateFrame("Button", nil, iconRow)
 	btn:SetWidth(ICON_PICKER_SIZE)
 	btn:SetHeight(ICON_PICKER_SIZE)
-	btn:SetPoint("LEFT", iconRow, "LEFT", (index - 1) * (ICON_PICKER_SIZE + 4), 0)
+	btn:SetPoint("TOPLEFT", iconRow, "TOPLEFT", (col - 1) * (ICON_PICKER_SIZE + 4), -(row - 1) * (ICON_PICKER_SIZE + 4))
 
 	local tex = btn:CreateTexture(nil, "ARTWORK")
 	tex:SetAllPoints(btn)
-	if texturePath then
-		tex:SetTexture(texturePath)
-	else
+	if not def then
 		tex:SetTexture(0.4, 0.4, 0.4, 1)
+	elseif def.color then
+		tex:SetTexture(def.color[1], def.color[2], def.color[3], 1)
+	else
+		tex:SetTexture(def.texture)
+		if def.texCoord then
+			tex:SetTexCoord(def.texCoord[1], def.texCoord[2], def.texCoord[3], def.texCoord[4])
+		end
 	end
 
 	btn.selectedBorder = CreateSelectionBorder(btn, 2)
@@ -412,7 +452,7 @@ local function MakeIconButton(iconRow, index, iconValue, texturePath)
 	btn:SetScript("OnClick", function() iconRow:SetSelected(iconValue) end)
 	btn:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
-		GameTooltip:SetText(iconValue and ("Icon " .. iconValue) or "No icon", 1, 1, 1)
+		GameTooltip:SetText(def and def.name or "No icon", 1, 1, 1)
 		GameTooltip:Show()
 	end)
 	btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -423,9 +463,11 @@ end
 
 local function BuildIconPicker(parent)
 	local iconRow = CreateFrame("Frame", nil, parent)
-	local count = #DR.DrawEngine.RAID_ICONS + 1
-	iconRow:SetWidth(count * (ICON_PICKER_SIZE + 4))
-	iconRow:SetHeight(ICON_PICKER_SIZE)
+	local icons = DR.DrawEngine.POINT_ICONS
+	local count = #icons + 1
+	local rows = math.ceil(count / ICONS_PER_ROW)
+	iconRow:SetWidth(math.min(count, ICONS_PER_ROW) * (ICON_PICKER_SIZE + 4))
+	iconRow:SetHeight(rows * (ICON_PICKER_SIZE + 4))
 	iconRow.buttons = {}
 	iconRow.selected = nil
 
@@ -440,16 +482,23 @@ local function BuildIconPicker(parent)
 		end
 	end
 
-	MakeIconButton(iconRow, 1, nil, nil)
-	for i, texturePath in ipairs(DR.DrawEngine.RAID_ICONS) do
-		MakeIconButton(iconRow, i + 1, i, texturePath)
+	local function GridPos(index)
+		local col = (index - 1) % ICONS_PER_ROW + 1
+		local row = math.floor((index - 1) / ICONS_PER_ROW) + 1
+		return col, row
+	end
+
+	MakeIconButton(iconRow, 1, 1, nil, nil)
+	for i, def in ipairs(icons) do
+		local col, row = GridPos(i + 1)
+		MakeIconButton(iconRow, col, row, i, def)
 	end
 
 	return iconRow
 end
 
 local function BuildPointEditor()
-	local f = CreateBorderedFrame("AscensionDungeonMapperPointEditor", UIParent, 320, 320, "Marker Note")
+	local f = CreateBorderedFrame("AscensionDungeonMapperPointEditor", UIParent, 320, 350, "Marker Note")
 	f:SetPoint("CENTER")
 
 	local titleLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -497,6 +546,7 @@ local function BuildPointEditor()
 			editingEntry.title = f.titleBox:GetText()
 			editingEntry.text = f.descBox:GetText()
 			editingEntry.SetIcon(f.iconRow.selected)
+			MaybeAutoSave()
 		end
 		f:Hide()
 	end)
@@ -506,6 +556,7 @@ local function BuildPointEditor()
 	deleteBtn:SetScript("OnClick", function()
 		if editingEntry then
 			DR.DrawEngine.RemovePoint(editingEntry)
+			MaybeAutoSave()
 		end
 		f:Hide()
 	end)
@@ -548,6 +599,29 @@ StaticPopupDialogs["ASCENSIONDUNGEONMAPPER_NEW_ROUTE"] = {
 	hideOnEscape = true,
 }
 
+StaticPopupDialogs["ASCENSIONDUNGEONMAPPER_RENAME_ROUTE"] = {
+	text = "Rename route to:",
+	button1 = "Rename",
+	button2 = CANCEL,
+	hasEditBox = true,
+	maxLetters = 64,
+	OnShow = function(self)
+		self.editBox:SetText(currentRouteName or "")
+		self.editBox:HighlightText()
+	end,
+	OnAccept = function(self)
+		DR.UI.RenameCurrentRoute(self.editBox:GetText())
+	end,
+	EditBoxOnEnterPressed = function(self)
+		DR.UI.RenameCurrentRoute(self:GetText())
+		self:GetParent():Hide()
+	end,
+	EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
+	timeout = 0,
+	whileDead = true,
+	hideOnEscape = true,
+}
+
 local GITHUB_URL = "https://github.com/GildyBoye/AscensionDungeonMapper"
 local DISCORD_URL = "https://discord.com/invite/mQjgHCW"
 
@@ -555,7 +629,20 @@ StaticPopupDialogs["ASCENSIONDUNGEONMAPPER_CONFIRM_CLEAR"] = {
 	text = "Clear the entire map? This removes every line and point and can't be undone.",
 	button1 = "Clear",
 	button2 = CANCEL,
-	OnAccept = function() DR.DrawEngine.Clear() end,
+	OnAccept = function()
+		DR.DrawEngine.Clear()
+		MaybeAutoSave()
+	end,
+	timeout = 0,
+	whileDead = true,
+	hideOnEscape = true,
+}
+
+StaticPopupDialogs["ASCENSIONDUNGEONMAPPER_CONFIRM_DELETE"] = {
+	text = "Delete route \"%s\"? This can't be undone.",
+	button1 = "Delete",
+	button2 = CANCEL,
+	OnAccept = function() DeleteCurrentRoute() end,
 	timeout = 0,
 	whileDead = true,
 	hideOnEscape = true,
@@ -885,10 +972,21 @@ local function RenderSharePreview(previewFrame, routeData)
 			tex = previewFrame:CreateTexture(nil, "OVERLAY")
 			previewPointTexs[pointCount] = tex
 		end
-		if p.icon and DR.DrawEngine.RAID_ICONS[p.icon] then
-			tex:SetTexture(DR.DrawEngine.RAID_ICONS[p.icon])
-		else
+		local def = p.icon and DR.DrawEngine.POINT_ICONS[p.icon]
+		if not def then
 			tex:SetTexture(0.95, 0.25, 0.2, 1)
+			tex:SetTexCoord(0, 1, 0, 1)
+		elseif def.color then
+			tex:SetTexture(def.color[1], def.color[2], def.color[3], 1)
+			tex:SetTexCoord(0, 1, 0, 1)
+		else
+			tex:SetTexture(def.texture)
+			local tc = def.texCoord
+			if tc then
+				tex:SetTexCoord(tc[1], tc[2], tc[3], tc[4])
+			else
+				tex:SetTexCoord(0, 1, 0, 1)
+			end
 		end
 		tex:SetWidth(8)
 		tex:SetHeight(8)
@@ -1007,7 +1105,7 @@ end
 local CONTENT_X = 274
 
 local function BuildMainFrame()
-	local f = CreateBorderedFrame("AscensionDungeonMapperMainFrame", UIParent, 960, 730, "Ascension Dungeon Mapper")
+	local f = CreateBorderedFrame("AscensionDungeonMapperMainFrame", UIParent, 960, 758, "Ascension Dungeon Mapper")
 	f:SetPoint("CENTER")
 	f:SetFrameStrata("HIGH")
 	f:Hide()
@@ -1072,6 +1170,7 @@ local function BuildMainFrame()
 
 	DR.DrawEngine.Init(canvas)
 	DR.DrawEngine.onPointClick = OpenPointEditor
+	DR.DrawEngine.onChange = MaybeAutoSave
 
 	local colorPicker = BuildColorPicker(canvas)
 
@@ -1124,15 +1223,37 @@ local function BuildMainFrame()
 
 	local ROUTE_ROW_HEIGHT = 16
 	local ROUTE_BOX_WIDTH = 180
+	local ROUTE_BOX_HEADER_H = 28
+	local routeListHeight = ROUTE_ROW_HEIGHT * MAX_ROUTES_PER_DUNGEON + 10
 	local toolbar2 = CreateFrame("Frame", nil, f)
 	toolbar2:SetPoint("TOPLEFT", toolbar, "BOTTOMLEFT", 0, -8)
 	toolbar2:SetWidth(CANVAS_W)
-	toolbar2:SetHeight(ROUTE_ROW_HEIGHT * MAX_ROUTES_PER_DUNGEON + 10)
+	toolbar2:SetHeight(routeListHeight + ROUTE_BOX_HEADER_H)
+
+	local renameBtn = CreateActionButton(toolbar2, "Rename", 87)
+	renameBtn:SetPoint("TOPLEFT", toolbar2, "TOPLEFT", 0, 0)
+	renameBtn:SetScript("OnClick", function()
+		if not currentRouteName then
+			DR.Print("No route loaded to rename.")
+			return
+		end
+		StaticPopup_Show("ASCENSIONDUNGEONMAPPER_RENAME_ROUTE")
+	end)
+
+	local deleteBtn = CreateActionButton(toolbar2, "Delete", 87)
+	deleteBtn:SetPoint("LEFT", renameBtn, "RIGHT", 6, 0)
+	deleteBtn:SetScript("OnClick", function()
+		if not currentRouteName then
+			DR.Print("No route loaded to delete.")
+			return
+		end
+		StaticPopup_Show("ASCENSIONDUNGEONMAPPER_CONFIRM_DELETE", currentRouteName)
+	end)
 
 	local routeBox = CreateFrame("Frame", nil, toolbar2)
-	routeBox:SetPoint("LEFT", toolbar2, "LEFT", 0, 0)
+	routeBox:SetPoint("TOPLEFT", toolbar2, "TOPLEFT", 0, -ROUTE_BOX_HEADER_H)
 	routeBox:SetWidth(ROUTE_BOX_WIDTH)
-	routeBox:SetHeight(ROUTE_ROW_HEIGHT * MAX_ROUTES_PER_DUNGEON + 10)
+	routeBox:SetHeight(routeListHeight)
 	routeBox:SetBackdrop({
 		bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
 		edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -1162,11 +1283,16 @@ local function BuildMainFrame()
 		routeBoxSlots[i] = slot
 	end
 
-	local row1Width = 100 + 6 + 70 + 6 + 70
+	-- Centered on the full canvas width, same as the Draw/Marker/Erase and
+	-- Undo/Clear rows above -- narrow enough now that Rename/Delete moved
+	-- out of this row that it still clears the route list on the left.
+	-- Vertically centered against the list's own region (not the taller
+	-- toolbar2, which now also has the Rename/Delete row above the list).
+	local row1Width = 100 + 6 + 70
 	local row2Width = 80 + 6 + 80
 	local row1X = (CANVAS_W - row1Width) / 2
 	local row2X = (CANVAS_W - row2Width) / 2
-	local buttonBlockTop = -(toolbar2:GetHeight() - (22 + 6 + 22)) / 2
+	local buttonBlockTop = -ROUTE_BOX_HEADER_H - (routeListHeight - (22 + 6 + 22)) / 2
 
 	local newBtn = CreateActionButton(toolbar2, "New Route", 100)
 	newBtn:SetPoint("TOPLEFT", toolbar2, "TOPLEFT", row1X, buttonBlockTop)
@@ -1177,11 +1303,17 @@ local function BuildMainFrame()
 
 	local saveBtn = CreateActionButton(toolbar2, "Save", 70)
 	saveBtn:SetPoint("LEFT", newBtn, "RIGHT", 6, 0)
-	saveBtn:SetScript("OnClick", SaveCurrentRoute)
+	saveBtn:SetScript("OnClick", function() SaveCurrentRoute() end)
 
-	local deleteBtn = CreateActionButton(toolbar2, "Delete", 70)
-	deleteBtn:SetPoint("LEFT", saveBtn, "RIGHT", 6, 0)
-	deleteBtn:SetScript("OnClick", DeleteCurrentRoute)
+	local autoSaveCheck = CreateFrame("CheckButton", "AscensionDungeonMapperAutoSaveCheck", toolbar2, "UICheckButtonTemplate")
+	autoSaveCheck:SetWidth(22)
+	autoSaveCheck:SetHeight(22)
+	autoSaveCheck:SetPoint("LEFT", saveBtn, "RIGHT", 8, 0)
+	_G[autoSaveCheck:GetName() .. "Text"]:SetText("Auto-Save")
+	autoSaveCheck:SetChecked(DR.db.autoSave and true or false)
+	autoSaveCheck:SetScript("OnClick", function(self)
+		DR.db.autoSave = self:GetChecked() and true or false
+	end)
 
 	local exportBtn = CreateActionButton(toolbar2, "Export", 80)
 	exportBtn:SetPoint("TOPLEFT", toolbar2, "TOPLEFT", row2X, buttonBlockTop - 22 - 6)

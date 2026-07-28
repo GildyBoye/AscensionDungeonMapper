@@ -87,6 +87,16 @@ function DR.DeleteRoute(dungeonKey, routeName)
 	end
 end
 
+function DR.RenameRoute(dungeonKey, oldName, newName)
+	local routes = DR.db.routes[dungeonKey]
+	if not routes or not routes[oldName] or routes[newName] then
+		return false
+	end
+	routes[newName] = routes[oldName]
+	routes[oldName] = nil
+	return true
+end
+
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:SetScript("OnEvent", function(self, event, addonName)

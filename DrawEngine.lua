@@ -50,6 +50,14 @@ end
 
 local MIN_SEGMENT_DIST = 0.008
 
+-- Caps how long a single drawn segment can be. Fast drags can move the
+-- cursor a long way between two OnUpdate samples, and a single very long,
+-- thin, steeply-angled rotated bar renders badly (shows up as sparse
+-- horizontal-looking dashes instead of a solid line). Splitting a big jump
+-- into several shorter segments along the same straight path avoids that
+-- and also fills in what would otherwise be a visible gap.
+local MAX_STEP_DIST = 0.01
+
 local ERASE_TOLERANCE_PX = 6
 
 local canvas
@@ -88,6 +96,10 @@ local function ClampNorm(v)
 	return v
 end
 
+local function InCanvas(x, y)
+	return x >= 0 and x <= 1 and y >= 0 and y <= 1
+end
+
 local function PositionLineTexture(tex, x1, y1, x2, y2)
 	local w, h = canvas:GetWidth(), canvas:GetHeight()
 	local px1, py1 = x1 * w, y1 * h
@@ -113,6 +125,18 @@ local function CreateLineWidget(x1, y1, x2, y2, strokeId, color)
 	local entry = { tex = tex, x1 = x1, y1 = y1, x2 = x2, y2 = y2, strokeId = strokeId, color = color }
 	lineWidgets[#lineWidgets + 1] = entry
 	return entry
+end
+
+local function DrawSteppedSegment(x1, y1, x2, y2, strokeId, color)
+	local dx, dy = x2 - x1, y2 - y1
+	local dist = math.sqrt(dx * dx + dy * dy)
+	local steps = math.max(1, math.ceil(dist / MAX_STEP_DIST))
+	local px, py = x1, y1
+	for i = 1, steps do
+		local nx, ny = x1 + dx * (i / steps), y1 + dy * (i / steps)
+		CreateLineWidget(px, py, nx, ny, strokeId, color)
+		px, py = nx, ny
+	end
 end
 
 local function DistPointToSegmentPx(px, py, x1, y1, x2, y2)
@@ -179,17 +203,36 @@ local function EraseNear(x, y)
 	end
 end
 
-local RAID_ICONS = {
-	"Interface\\TargetingFrame\\UI-RaidTargetingIcon_1",
-	"Interface\\TargetingFrame\\UI-RaidTargetingIcon_2",
-	"Interface\\TargetingFrame\\UI-RaidTargetingIcon_3",
-	"Interface\\TargetingFrame\\UI-RaidTargetingIcon_4",
-	"Interface\\TargetingFrame\\UI-RaidTargetingIcon_5",
-	"Interface\\TargetingFrame\\UI-RaidTargetingIcon_6",
-	"Interface\\TargetingFrame\\UI-RaidTargetingIcon_7",
-	"Interface\\TargetingFrame\\UI-RaidTargetingIcon_8",
+-- Every selectable marker icon, in a fixed order so existing saved/shared
+-- points (which store just an index into this list) keep pointing at the
+-- same icon after this list grows. Only append, never reorder/remove.
+local POINT_ICONS = {}
+for i = 1, 8 do
+	POINT_ICONS[#POINT_ICONS + 1] = {
+		texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_" .. i,
+		name = "Raid Icon " .. i,
+	}
+end
+
+-- Coordinates match Blizzard's own FrameXML usage of this texture
+-- (LFGFrame.lua), a 64x64 sheet -- not a uniform grid, so these can't be
+-- derived, only copied from the source.
+local ROLE_ICON_TEXTURE = "Interface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES"
+local ROLES = {
+	{ name = "Tank", texCoord = { 0 / 64, 19 / 64, 22 / 64, 41 / 64 } },
+	{ name = "Healer", texCoord = { 20 / 64, 39 / 64, 1 / 64, 20 / 64 } },
+	{ name = "DPS", texCoord = { 20 / 64, 39 / 64, 22 / 64, 41 / 64 } },
 }
-Draw.RAID_ICONS = RAID_ICONS
+for _, role in ipairs(ROLES) do
+	POINT_ICONS[#POINT_ICONS + 1] = { texture = ROLE_ICON_TEXTURE, texCoord = role.texCoord, name = role.name }
+end
+
+local COLOR_NAMES = { "Blue", "Red", "Green", "Yellow", "Purple", "Orange", "White" }
+for i, c in ipairs(LINE_COLORS) do
+	POINT_ICONS[#POINT_ICONS + 1] = { color = c, name = COLOR_NAMES[i] .. " Marker" }
+end
+
+Draw.POINT_ICONS = POINT_ICONS
 
 local function PositionPointFrame(frame, x, y)
 	local w, h = canvas:GetWidth(), canvas:GetHeight()
@@ -219,12 +262,24 @@ local function CreatePointWidget(x, y, title, text, icon)
 
 	function entry.SetIcon(newIcon)
 		entry.icon = newIcon
-		if newIcon and RAID_ICONS[newIcon] then
-			tex:SetTexture(RAID_ICONS[newIcon])
-			border:Hide()
-		else
+		local def = newIcon and POINT_ICONS[newIcon]
+		if not def then
 			tex:SetTexture(POINT_COLOR[1], POINT_COLOR[2], POINT_COLOR[3], POINT_COLOR[4])
+			tex:SetTexCoord(0, 1, 0, 1)
 			border:Show()
+		elseif def.color then
+			tex:SetTexture(def.color[1], def.color[2], def.color[3], 1)
+			tex:SetTexCoord(0, 1, 0, 1)
+			border:Show()
+		else
+			tex:SetTexture(def.texture)
+			local tc = def.texCoord
+			if tc then
+				tex:SetTexCoord(tc[1], tc[2], tc[3], tc[4])
+			else
+				tex:SetTexCoord(0, 1, 0, 1)
+			end
+			border:Hide()
 		end
 	end
 	entry.SetIcon(icon)
@@ -249,6 +304,7 @@ local function CreatePointWidget(x, y, title, text, icon)
 				{ x = entry.x, y = entry.y, title = entry.title, text = entry.text, icon = entry.icon },
 			} }
 			Draw.RemovePoint(entry)
+			if Draw.onChange then Draw.onChange() end
 		elseif Draw.onPointClick then
 			Draw.onPointClick(entry)
 		end
@@ -259,6 +315,13 @@ local function CreatePointWidget(x, y, title, text, icon)
 end
 
 Draw.onPointClick = nil
+
+-- Fired after any action that changes what a saved route would contain (a
+-- completed stroke, a placed point, an erase, an undo) -- used by the UI to
+-- drive auto-save. Called via the Draw table field (not a local) so
+-- earlier-defined closures in this file can still reach it. Deliberately
+-- NOT fired by Draw.Clear -- see the comment on that function.
+Draw.onChange = nil
 
 function Draw.Init(canvasFrame)
 	canvas = canvasFrame
@@ -277,6 +340,7 @@ function Draw.Init(canvasFrame)
 			local x, y = GetNormalizedCursorPos()
 			local entry = CreatePointWidget(ClampNorm(x), ClampNorm(y), "", "", nil)
 			history[#history + 1] = { kind = "point", entry = entry }
+			if Draw.onChange then Draw.onChange() end
 			if Draw.onPointClick then
 				Draw.onPointClick(entry)
 			end
@@ -292,12 +356,18 @@ function Draw.Init(canvasFrame)
 	canvas:SetScript("OnUpdate", function(self)
 		if mode == "line" and painting then
 			local x, y = GetNormalizedCursorPos()
-			x, y = ClampNorm(x), ClampNorm(y)
-			local dx, dy = x - lastX, y - lastY
-			if math.sqrt(dx * dx + dy * dy) >= MIN_SEGMENT_DIST then
-				CreateLineWidget(lastX, lastY, x, y, currentStrokeId, currentLineColor)
-				strokeHasSegment = true
-				lastX, lastY = x, y
+			-- Ignore samples taken while the cursor has drifted off the
+			-- canvas (easy to do on a fast drag, especially vertically since
+			-- the canvas is shorter than it is wide) instead of clamping to
+			-- the edge -- clamping was smearing a segment along whichever
+			-- border got overshot.
+			if InCanvas(x, y) then
+				local dx, dy = x - lastX, y - lastY
+				if math.sqrt(dx * dx + dy * dy) >= MIN_SEGMENT_DIST then
+					DrawSteppedSegment(lastX, lastY, x, y, currentStrokeId, currentLineColor)
+					strokeHasSegment = true
+					lastX, lastY = x, y
+				end
 			end
 		elseif mode == "erase" and erasing then
 			local x, y = GetNormalizedCursorPos()
@@ -309,14 +379,16 @@ function Draw.Init(canvasFrame)
 		if button ~= "LeftButton" then return end
 		if mode == "line" and painting then
 			local x, y = GetNormalizedCursorPos()
-			x, y = ClampNorm(x), ClampNorm(y)
-			local dx, dy = x - lastX, y - lastY
-			if math.sqrt(dx * dx + dy * dy) > 0.0005 then
-				CreateLineWidget(lastX, lastY, x, y, currentStrokeId, currentLineColor)
-				strokeHasSegment = true
+			if InCanvas(x, y) then
+				local dx, dy = x - lastX, y - lastY
+				if math.sqrt(dx * dx + dy * dy) > 0.0005 then
+					DrawSteppedSegment(lastX, lastY, x, y, currentStrokeId, currentLineColor)
+					strokeHasSegment = true
+				end
 			end
 			if strokeHasSegment then
 				history[#history + 1] = { kind = "stroke", strokeId = currentStrokeId }
+				if Draw.onChange then Draw.onChange() end
 			end
 			painting = false
 			currentStrokeId = nil
@@ -324,6 +396,7 @@ function Draw.Init(canvasFrame)
 			erasing = false
 			if eraseSessionLines and (#eraseSessionLines > 0 or #eraseSessionPoints > 0) then
 				history[#history + 1] = { kind = "erase", lines = eraseSessionLines, points = eraseSessionPoints }
+				if Draw.onChange then Draw.onChange() end
 			end
 			eraseSessionLines = nil
 			eraseSessionPoints = nil
@@ -390,8 +463,15 @@ function Draw.Undo()
 			CreatePointWidget(p.x, p.y, p.title, p.text, p.icon)
 		end
 	end
+	if Draw.onChange then Draw.onChange() end
 end
 
+-- Deliberately does NOT fire onChange -- it's also used to blank the canvas
+-- before naming a brand new route (see the "New Route" button), and firing
+-- auto-save there would silently overwrite the previously loaded route with
+-- an empty one before the new name is even picked. Callers that clear an
+-- already-named route in place (the Clear toolbar button) trigger auto-save
+-- themselves after calling this.
 function Draw.Clear()
 	for _, l in ipairs(lineWidgets) do l.tex:Hide() end
 	for _, p in ipairs(pointWidgets) do p.frame:Hide(); p.frame:SetParent(nil) end
