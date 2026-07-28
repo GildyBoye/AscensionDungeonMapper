@@ -18,8 +18,19 @@ Share.onShareAnnounced = nil
 
 local pendingShares = {}
 local shareOrder = {}
-local shareCounter = 0
 local lastFulfilledFrom = {}
+
+math.randomseed(time())
+
+local ID_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+local function RandomShareID()
+	local parts = {}
+	for i = 1, 10 do
+		local idx = math.random(1, #ID_CHARS)
+		parts[i] = ID_CHARS:sub(idx, idx)
+	end
+	return table.concat(parts)
+end
 
 local function EvictOldShares()
 	local cutoff = time() - SHARE_CACHE_MAX_AGE
@@ -33,6 +44,26 @@ local function EvictOldShares()
 	end
 end
 
+-- Is `sender` currently a member of the group/guild this share was posted
+-- to? Checked at fulfill time (not just at post time) so the audience is
+-- re-verified against who you're grouped/guilded with right now, not who
+-- could theoretically guess a valid ID.
+local function SenderStillEligible(sender, channel)
+	if channel == "GUILD" then
+		if not IsInGuild() then return false end
+		for i = 1, GetNumGuildMembers() do
+			local name = GetGuildRosterInfo(i)
+			if name and name:match("^([^-]+)") == sender then
+				return true
+			end
+		end
+		return false
+	end
+	-- PARTY or RAID: treat "currently grouped with" as good enough for
+	-- either, rather than splitting hairs over which exact channel.
+	return (UnitInParty(sender) and true) or (UnitInRaid(sender) and true) or false
+end
+
 function Share.PostRoute(channel, dungeonKey, routeName, routeData)
 	if not ChatThrottleLib then
 		DR.Print("ChatThrottleLib isn't loaded -- can't share to chat.")
@@ -44,9 +75,11 @@ function Share.PostRoute(channel, dungeonKey, routeName, routeData)
 		return
 	end
 
-	shareCounter = shareCounter + 1
-	local shareID = tostring(shareCounter)
-	pendingShares[shareID] = { exportString = str, timestamp = time() }
+	local shareID = RandomShareID()
+	while pendingShares[shareID] do
+		shareID = RandomShareID()
+	end
+	pendingShares[shareID] = { exportString = str, timestamp = time(), channel = channel }
 	shareOrder[#shareOrder + 1] = shareID
 	EvictOldShares()
 
@@ -92,12 +125,19 @@ function Share.FulfillRequest(sender, shareID)
 	if lastFulfilledFrom[sender] and now - lastFulfilledFrom[sender] < RATE_LIMIT_SECONDS then
 		return
 	end
+	-- Set unconditionally, before we know whether this request is even
+	-- valid -- otherwise requests for nonexistent/ineligible IDs never trip
+	-- the cooldown and an attacker gets unlimited free replies.
+	lastFulfilledFrom[sender] = now
+
 	local share = pendingShares[shareID]
-	if not share then
+	-- Same generic response whether the ID doesn't exist or the requester
+	-- just isn't currently eligible for it -- don't give an attacker an
+	-- oracle for which random IDs happen to be real.
+	if not share or not SenderStillEligible(sender, share.channel) then
 		ChatThrottleLib:SendAddonMessage("NORMAL", ADDON_PREFIX, "ERR:" .. shareID .. ":notfound", "WHISPER", sender)
 		return
 	end
-	lastFulfilledFrom[sender] = now
 
 	local str = share.exportString
 	local total = math.ceil(#str / CHUNK_SIZE)
