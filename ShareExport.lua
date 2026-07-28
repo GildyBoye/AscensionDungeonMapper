@@ -4,6 +4,15 @@ DR.ShareExport = {}
 
 local PREFIX = "DR1:"
 
+-- Sane ceilings on untrusted input -- generous enough that no real route
+-- ever gets close, but they cap the worst case (a deliberately oversized or
+-- decompression-bomb-style paste/share) to something that can't hang or
+-- crash the client trying to handle it.
+local MAX_INPUT_LEN = 100000
+local MAX_DECOMPRESSED_LEN = 200000
+local MAX_LINES = 5000
+local MAX_POINTS = 500
+
 local function TrimString(s)
 	return s:match("^%s*(.-)%s*$")
 end
@@ -47,6 +56,9 @@ function DR.ShareExport.Import(str)
 	if type(str) ~= "string" then
 		return false, nil, nil, nil, "no data given"
 	end
+	if #str > MAX_INPUT_LEN then
+		return false, nil, nil, nil, "that's way too long to be a real share string"
+	end
 	str = TrimString(str)
 	if str:sub(1, #PREFIX) ~= PREFIX then
 		return false, nil, nil, nil, "doesn't look like a AscensionDungeonMapper share string"
@@ -61,6 +73,9 @@ function DR.ShareExport.Import(str)
 	local serialized = LibDeflate:DecompressDeflate(compressed)
 	if not serialized then
 		return false, nil, nil, nil, "couldn't decompress string (was it copied fully?)"
+	end
+	if #serialized > MAX_DECOMPRESSED_LEN then
+		return false, nil, nil, nil, "decompressed route data is implausibly large"
 	end
 
 	local ok, package = DR.Serializer:Deserialize(serialized)
@@ -79,6 +94,10 @@ function DR.ShareExport.Import(str)
 
 	package.rd.lines = package.rd.lines or {}
 	package.rd.points = package.rd.points or {}
+
+	if #package.rd.lines > MAX_LINES or #package.rd.points > MAX_POINTS then
+		return false, nil, nil, nil, "this route has an implausible number of lines/points"
+	end
 
 	return true, package.dk, package.rn, package.rd
 end

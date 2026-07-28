@@ -561,12 +561,10 @@ StaticPopupDialogs["ASCENSIONDUNGEONMAPPER_CONFIRM_CLEAR"] = {
 	hideOnEscape = true,
 }
 
-function DR.UI.HandleImport(text)
-	local ok, dungeonKey, routeName, routeData, err = DR.ShareExport.Import(text)
-	if not ok then
-		DR.Print("Import failed: " .. tostring(err))
-		return
-	end
+-- Shared by manual paste-import and accepting a chat-shared route: given an
+-- already-parsed/validated route, rename on collision, respect the
+-- per-dungeon cap, save it, and switch the UI to show it.
+function DR.UI.ImportParsedRoute(dungeonKey, routeName, routeData, sourceLabel)
 	local existingRoutes = DR.GetRoutesForDungeon(dungeonKey)
 	if existingRoutes[routeName] then
 		routeName = routeName .. " (imported)"
@@ -576,7 +574,7 @@ function DR.UI.HandleImport(text)
 		for _ in pairs(existingRoutes) do count = count + 1 end
 		if count >= MAX_ROUTES_PER_DUNGEON then
 			DR.Print(("Import failed: that dungeon already has %d saved routes (the max). Delete one first."):format(MAX_ROUTES_PER_DUNGEON))
-			return
+			return false
 		end
 	end
 	DR.SaveRoute(dungeonKey, routeName, routeData)
@@ -585,7 +583,17 @@ function DR.UI.HandleImport(text)
 	SetEra(info.era)
 	SelectDungeon(dungeonKey)
 	DR.UI.LoadRoute(routeName)
-	DR.Print("Imported route '" .. routeName .. "' for " .. info.name .. ".")
+	DR.Print(("Imported route '%s' for %s%s."):format(routeName, info.name, sourceLabel and (" " .. sourceLabel) or ""))
+	return true
+end
+
+function DR.UI.HandleImport(text)
+	local ok, dungeonKey, routeName, routeData, err = DR.ShareExport.Import(text)
+	if not ok then
+		DR.Print("Import failed: " .. tostring(err))
+		return
+	end
+	DR.UI.ImportParsedRoute(dungeonKey, routeName, routeData)
 end
 
 local TEXT_DIALOG_W, TEXT_DIALOG_H = 520, 360
@@ -693,14 +701,11 @@ local function OpenDiscordDialog()
 	OpenLinkDialog(discordDialog)
 end
 
-local function ExportCurrent()
-	if not currentDungeonKey then
-		DR.Print("Select a dungeon first.")
-		return
-	end
-	local name = currentRouteName or "Unsaved Route"
+-- Snapshot of the current canvas as a routeData table, used by both Export
+-- and the chat-share buttons.
+local function BuildCurrentRouteData()
 	local lines, points = DR.DrawEngine.GetRouteData()
-	local routeData = {
+	return {
 		author = (UnitName("player") or "Unknown") .. "-" .. (GetRealmName() or ""),
 		level = currentLevel,
 		created = time(),
@@ -708,12 +713,85 @@ local function ExportCurrent()
 		lines = lines,
 		points = points,
 	}
+end
+
+local function ExportCurrent()
+	if not currentDungeonKey then
+		DR.Print("Select a dungeon first.")
+		return
+	end
+	local name = currentRouteName or "Unsaved Route"
+	local routeData = BuildCurrentRouteData()
 	local str, err = DR.ShareExport.Export(currentDungeonKey, name, routeData)
 	if not str then
 		DR.Print("Export failed: " .. tostring(err))
 		return
 	end
 	OpenExportDialog("Share string for \"" .. name .. "\"", str)
+end
+
+local function ShareCurrentRoute(channel)
+	if not currentDungeonKey then
+		DR.Print("Select a dungeon first.")
+		return
+	end
+	if channel == "GUILD" and not IsInGuild() then
+		DR.Print("You're not in a guild.")
+		return
+	end
+	if channel == "PARTY" and not IsInGroup() then
+		DR.Print("You're not in a party.")
+		return
+	end
+	if channel == "RAID" and not IsInRaid() then
+		DR.Print("You're not in a raid.")
+		return
+	end
+	local name = currentRouteName or "Unsaved Route"
+	local routeData = BuildCurrentRouteData()
+	DR.ShareChat.PostRoute(channel, currentDungeonKey, name, routeData)
+end
+
+local shareChannelDialog
+
+local function BuildShareChannelDialog()
+	local f = CreateBorderedFrame("AscensionDungeonMapperShareChannel", UIParent, 260, 150, "Share Route")
+	f:SetPoint("CENTER")
+	f:SetFrameStrata("DIALOG")
+	f:Hide()
+
+	local info = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	info:SetPoint("TOP", f, "TOP", 0, -34)
+	info:SetText("Share to which chat?")
+
+	local raidBtn = CreateActionButton(f, "Raid", 70)
+	raidBtn:SetPoint("TOP", info, "BOTTOM", 0, -16)
+	raidBtn:SetScript("OnClick", function() ShareCurrentRoute("RAID") f:Hide() end)
+
+	local partyBtn = CreateActionButton(f, "Party", 70)
+	partyBtn:SetPoint("RIGHT", raidBtn, "LEFT", -6, 0)
+	partyBtn:SetScript("OnClick", function() ShareCurrentRoute("PARTY") f:Hide() end)
+
+	local guildBtn = CreateActionButton(f, "Guild", 70)
+	guildBtn:SetPoint("LEFT", raidBtn, "RIGHT", 6, 0)
+	guildBtn:SetScript("OnClick", function() ShareCurrentRoute("GUILD") f:Hide() end)
+
+	local cancelBtn = CreateActionButton(f, "Cancel", 80)
+	cancelBtn:SetPoint("BOTTOM", f, "BOTTOM", 0, 14)
+	cancelBtn:SetScript("OnClick", function() f:Hide() end)
+
+	return f
+end
+
+local function OpenShareChannelDialog()
+	if not currentDungeonKey then
+		DR.Print("Select a dungeon first.")
+		return
+	end
+	if not shareChannelDialog then
+		shareChannelDialog = BuildShareChannelDialog()
+	end
+	shareChannelDialog:Show()
 end
 
 local COLOR_SWATCH_SIZE = 18
@@ -759,6 +837,171 @@ local function BuildColorPicker(parentCanvas)
 	picker.buttons[1].selectedBorder:Show()
 
 	return picker
+end
+
+-- Shared-route accept/decline popup: a small static preview (no
+-- interactivity, just a sketch of the lines/markers) so the recipient can
+-- see roughly what they're about to import before it touches their saved
+-- routes.
+local PREVIEW_W, PREVIEW_H = 260, 170
+local previewLineTexs = {}
+local previewPointTexs = {}
+
+local function RenderSharePreview(previewFrame, routeData)
+	for _, t in ipairs(previewLineTexs) do t:Hide() end
+	for _, t in ipairs(previewPointTexs) do t:Hide() end
+
+	local lineCount = 0
+	for _, l in ipairs(routeData.lines or {}) do
+		local x1, y1, x2, y2, color = DR.DrawEngine.NormalizeLineData(l)
+		lineCount = lineCount + 1
+		local tex = previewLineTexs[lineCount]
+		if not tex then
+			tex = previewFrame:CreateTexture(nil, "ARTWORK")
+			previewLineTexs[lineCount] = tex
+		end
+		tex:SetTexture(color[1], color[2], color[3], color[4])
+		local px1, py1 = x1 * PREVIEW_W, y1 * PREVIEW_H
+		local px2, py2 = x2 * PREVIEW_W, y2 * PREVIEW_H
+		local midx, midy = (px1 + px2) / 2, (py1 + py2) / 2
+		local dx, dy = px2 - px1, py2 - py1
+		local length = math.sqrt(dx * dx + dy * dy)
+		if length < 1 then length = 1 end
+		local angle = math.atan2(-dy, dx)
+		tex:ClearAllPoints()
+		tex:SetPoint("CENTER", previewFrame, "TOPLEFT", midx, -midy)
+		tex:SetWidth(length)
+		tex:SetHeight(1.5)
+		tex:SetRotation(angle)
+		tex:Show()
+	end
+
+	local pointCount = 0
+	for _, p in ipairs(routeData.points or {}) do
+		local x, y = DR.DrawEngine.NormalizePointData(p)
+		pointCount = pointCount + 1
+		local tex = previewPointTexs[pointCount]
+		if not tex then
+			tex = previewFrame:CreateTexture(nil, "OVERLAY")
+			previewPointTexs[pointCount] = tex
+		end
+		if p.icon and DR.DrawEngine.RAID_ICONS[p.icon] then
+			tex:SetTexture(DR.DrawEngine.RAID_ICONS[p.icon])
+		else
+			tex:SetTexture(0.95, 0.25, 0.2, 1)
+		end
+		tex:SetWidth(8)
+		tex:SetHeight(8)
+		tex:ClearAllPoints()
+		tex:SetPoint("CENTER", previewFrame, "TOPLEFT", x * PREVIEW_W, -(y * PREVIEW_H))
+		tex:Show()
+	end
+end
+
+local sharePreviewDialog
+local pendingSharedRoute
+
+local function BuildSharePreviewDialog()
+	local f = CreateBorderedFrame("AscensionDungeonMapperSharePreview", UIParent, 300, 280, "Shared Route")
+	f:SetPoint("CENTER")
+	f:SetFrameStrata("DIALOG")
+	f:Hide()
+
+	local info = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	info:SetPoint("TOP", f, "TOP", 0, -34)
+	info:SetWidth(270)
+	info:SetJustifyH("CENTER")
+	f.info = info
+
+	local previewFrame = CreateFrame("Frame", nil, f)
+	previewFrame:SetWidth(PREVIEW_W)
+	previewFrame:SetHeight(PREVIEW_H)
+	previewFrame:SetPoint("TOP", info, "BOTTOM", 0, -10)
+	previewFrame:SetBackdrop({
+		bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+		edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+		edgeSize = 10,
+		insets = { left = 2, right = 2, top = 2, bottom = 2 },
+	})
+	previewFrame:SetBackdropColor(0.05, 0.05, 0.07, 1)
+	f.previewFrame = previewFrame
+
+	local acceptBtn = CreateActionButton(f, "Import", 90)
+	acceptBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 14, 14)
+	acceptBtn:SetScript("OnClick", function()
+		if pendingSharedRoute then
+			DR.UI.ImportParsedRoute(pendingSharedRoute.dungeonKey, pendingSharedRoute.routeName, pendingSharedRoute.routeData,
+				"(shared by " .. pendingSharedRoute.sender .. ")")
+		end
+		pendingSharedRoute = nil
+		f:Hide()
+	end)
+
+	local declineBtn = CreateActionButton(f, "Decline", 90)
+	declineBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 14)
+	declineBtn:SetScript("OnClick", function()
+		pendingSharedRoute = nil
+		f:Hide()
+	end)
+
+	return f
+end
+
+DR.ShareChat.onRouteReceived = function(sender, dungeonKey, routeName, routeData)
+	if not sharePreviewDialog then
+		sharePreviewDialog = BuildSharePreviewDialog()
+	end
+	pendingSharedRoute = { sender = sender, dungeonKey = dungeonKey, routeName = routeName, routeData = routeData }
+	local dungeonInfo = DR.DungeonByKey[dungeonKey]
+	sharePreviewDialog.info:SetText(("%s shared \"%s\" for %s"):format(sender, routeName, dungeonInfo and dungeonInfo.name or dungeonKey))
+	RenderSharePreview(sharePreviewDialog.previewFrame, routeData)
+	sharePreviewDialog:Show()
+end
+
+-- Non-modal heads-up shown when someone else in the party/raid/guild
+-- broadcasts a share announcement. Get kicks off the normal whisper-based
+-- request, which eventually lands in onRouteReceived above.
+local shareToastDialog
+
+local function BuildShareToastDialog()
+	local f = CreateBorderedFrame("AscensionDungeonMapperShareToast", UIParent, 280, 110, "Route Shared")
+	f:SetPoint("TOP", UIParent, "TOP", 0, -140)
+	f:SetFrameStrata("DIALOG")
+	f:Hide()
+
+	local info = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	info:SetPoint("TOP", f, "TOP", 0, -34)
+	info:SetWidth(250)
+	info:SetJustifyH("CENTER")
+	f.info = info
+
+	local getBtn = CreateActionButton(f, "Get", 90)
+	getBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 14, 14)
+	getBtn:SetScript("OnClick", function()
+		if f.pending then
+			DR.ShareChat.RequestRoute(f.pending.sender, f.pending.shareID)
+		end
+		f:Hide()
+	end)
+
+	local ignoreBtn = CreateActionButton(f, "Ignore", 90)
+	ignoreBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 14)
+	ignoreBtn:SetScript("OnClick", function()
+		f.pending = nil
+		f:Hide()
+	end)
+
+	return f
+end
+
+DR.ShareChat.onShareAnnounced = function(sender, shareID, dungeonKey, routeName)
+	if not shareToastDialog then
+		shareToastDialog = BuildShareToastDialog()
+	end
+	local dungeonInfo = DR.DungeonByKey[dungeonKey]
+	shareToastDialog.pending = { sender = sender, shareID = shareID }
+	shareToastDialog.info:SetText(("%s shared \"%s\" for %s"):format(sender, routeName, dungeonInfo and dungeonInfo.name or dungeonKey))
+	shareToastDialog:Show()
 end
 
 local CONTENT_X = 274
@@ -947,6 +1190,10 @@ local function BuildMainFrame()
 	local importBtn = CreateActionButton(toolbar2, "Import", 80)
 	importBtn:SetPoint("LEFT", exportBtn, "RIGHT", 6, 0)
 	importBtn:SetScript("OnClick", function() DR.UI.OpenImportDialog() end)
+
+	local shareBtn = CreateActionButton(toolbar2, "Share", 90)
+	shareBtn:SetPoint("TOPRIGHT", toolbar2, "TOPRIGHT", -10, buttonBlockTop - 22 - 6)
+	shareBtn:SetScript("OnClick", OpenShareChannelDialog)
 
 	local creditText = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	creditText:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -30, 14)

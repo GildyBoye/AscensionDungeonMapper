@@ -70,6 +70,8 @@ local currentStrokeId
 local strokeHasSegment
 local lastX, lastY
 
+local erasing = false
+
 local function GetNormalizedCursorPos()
 	local scale = canvas:GetEffectiveScale()
 	local cx, cy = GetCursorPosition()
@@ -132,16 +134,49 @@ local function DistPointToSegmentPx(px, py, x1, y1, x2, y2)
 	return math.sqrt(ddx * ddx + ddy * ddy)
 end
 
-local function FindNearestStrokeId(x, y)
-	local bestId, bestDist = nil, ERASE_TOLERANCE_PX
-	for _, l in ipairs(lineWidgets) do
-		local d = DistPointToSegmentPx(x, y, l.x1, l.y1, l.x2, l.y2)
-		if d <= bestDist then
-			bestDist = d
-			bestId = l.strokeId
+-- Removes exactly one segment (by index), not the whole stroke it came from
+-- -- classic eraser behavior, removes only what you actually drag over.
+-- Returns the removed segment's data so the caller can record it for undo.
+local function RemoveLineSegmentAt(index)
+	local l = lineWidgets[index]
+	l.tex:Hide()
+	table.remove(lineWidgets, index)
+	return { x1 = l.x1, y1 = l.y1, x2 = l.x2, y2 = l.y2, color = l.color }
+end
+
+local POINT_ERASE_RADIUS_PX = 14
+
+-- Set for the duration of one erase gesture (mouse-down to mouse-up) so
+-- EraseNear can accumulate what it removed; nil the rest of the time.
+local eraseSessionLines
+local eraseSessionPoints
+
+-- Erases every line segment and every point within tolerance of (x, y),
+-- normalized canvas coordinates. Called continuously while dragging in
+-- erase mode, so a drag sweeps out an eraser path rather than needing one
+-- precise click per item. Whatever it removes gets recorded into the
+-- current erase session so the whole gesture can be undone as one action.
+local function EraseNear(x, y)
+	for i = #lineWidgets, 1, -1 do
+		local l = lineWidgets[i]
+		if DistPointToSegmentPx(x, y, l.x1, l.y1, l.x2, l.y2) <= ERASE_TOLERANCE_PX then
+			local removed = RemoveLineSegmentAt(i)
+			if eraseSessionLines then
+				eraseSessionLines[#eraseSessionLines + 1] = removed
+			end
 		end
 	end
-	return bestId
+	local w, h = canvas:GetWidth(), canvas:GetHeight()
+	for i = #pointWidgets, 1, -1 do
+		local p = pointWidgets[i]
+		local dx, dy = (x - p.x) * w, (y - p.y) * h
+		if math.sqrt(dx * dx + dy * dy) <= POINT_ERASE_RADIUS_PX then
+			if eraseSessionPoints then
+				eraseSessionPoints[#eraseSessionPoints + 1] = { x = p.x, y = p.y, title = p.title, text = p.text, icon = p.icon }
+			end
+			Draw.RemovePoint(p)
+		end
+	end
 end
 
 local RAID_ICONS = {
@@ -206,6 +241,13 @@ local function CreatePointWidget(x, y, title, text, icon)
 
 	frame:SetScript("OnClick", function(self)
 		if mode == "erase" then
+			-- A direct click on the point's own button bypasses the canvas's
+			-- drag-erase session entirely, so record its own one-item erase
+			-- entry here to keep Undo consistent regardless of which path
+			-- removed it.
+			history[#history + 1] = { kind = "erase", lines = {}, points = {
+				{ x = entry.x, y = entry.y, title = entry.title, text = entry.text, icon = entry.icon },
+			} }
 			Draw.RemovePoint(entry)
 		elseif Draw.onPointClick then
 			Draw.onPointClick(entry)
@@ -239,12 +281,11 @@ function Draw.Init(canvasFrame)
 				Draw.onPointClick(entry)
 			end
 		elseif mode == "erase" then
+			erasing = true
+			eraseSessionLines = {}
+			eraseSessionPoints = {}
 			local x, y = GetNormalizedCursorPos()
-			x, y = ClampNorm(x), ClampNorm(y)
-			local strokeId = FindNearestStrokeId(x, y)
-			if strokeId then
-				Draw.RemoveStrokeById(strokeId)
-			end
+			EraseNear(ClampNorm(x), ClampNorm(y))
 		end
 	end)
 
@@ -258,6 +299,9 @@ function Draw.Init(canvasFrame)
 				strokeHasSegment = true
 				lastX, lastY = x, y
 			end
+		elseif mode == "erase" and erasing then
+			local x, y = GetNormalizedCursorPos()
+			EraseNear(ClampNorm(x), ClampNorm(y))
 		end
 	end)
 
@@ -276,6 +320,13 @@ function Draw.Init(canvasFrame)
 			end
 			painting = false
 			currentStrokeId = nil
+		elseif mode == "erase" then
+			erasing = false
+			if eraseSessionLines and (#eraseSessionLines > 0 or #eraseSessionPoints > 0) then
+				history[#history + 1] = { kind = "erase", lines = eraseSessionLines, points = eraseSessionPoints }
+			end
+			eraseSessionLines = nil
+			eraseSessionPoints = nil
 		end
 	end)
 end
@@ -284,6 +335,9 @@ function Draw.SetMode(newMode)
 	mode = newMode
 	painting = false
 	currentStrokeId = nil
+	erasing = false
+	eraseSessionLines = nil
+	eraseSessionPoints = nil
 end
 
 function Draw.GetMode()
@@ -325,6 +379,16 @@ function Draw.Undo()
 		Draw.RemoveStrokeById(last.strokeId)
 	elseif last.kind == "point" then
 		Draw.RemovePoint(last.entry)
+	elseif last.kind == "erase" then
+		-- Restores exactly what one erase gesture removed. Restored items
+		-- get fresh stroke IDs -- they're independently erasable again,
+		-- same as anything freshly drawn.
+		for _, l in ipairs(last.lines) do
+			CreateLineWidget(l.x1, l.y1, l.x2, l.y2, AllocateStrokeId(), l.color)
+		end
+		for _, p in ipairs(last.points) do
+			CreatePointWidget(p.x, p.y, p.title, p.text, p.icon)
+		end
 	end
 end
 
@@ -336,6 +400,9 @@ function Draw.Clear()
 	history = {}
 	painting = false
 	currentStrokeId = nil
+	erasing = false
+	eraseSessionLines = nil
+	eraseSessionPoints = nil
 end
 
 function Draw.RelayoutAll()
@@ -371,27 +438,41 @@ function Draw.GetRouteData()
 	return lines, points
 end
 
+-- Pure decode helpers -- no canvas/widget side effects, safe to call from
+-- anywhere (e.g. a static preview renderer) that just wants to know what a
+-- stored line/point actually means, across every format generation this
+-- addon has ever written.
+function Draw.NormalizeLineData(l)
+	local x1, y1, x2, y2 = l[1], l[2], l[3], l[4]
+	if IsQuantizedCoord(x1) or IsQuantizedCoord(y1) or IsQuantizedCoord(x2) or IsQuantizedCoord(y2) then
+		x1, y1, x2, y2 = UnquantizeCoord(x1), UnquantizeCoord(y1), UnquantizeCoord(x2), UnquantizeCoord(y2)
+	end
+	local color = DEFAULT_LINE_COLOR
+	if l[6] and l[7] then
+		color = { l[5], l[6], l[7], DEFAULT_LINE_COLOR[4] }
+	elseif l[5] and LINE_COLORS[l[5]] then
+		local c = LINE_COLORS[l[5]]
+		color = { c[1], c[2], c[3], DEFAULT_LINE_COLOR[4] }
+	end
+	return x1, y1, x2, y2, color
+end
+
+function Draw.NormalizePointData(p)
+	local x, y = p.x, p.y
+	if IsQuantizedCoord(x) or IsQuantizedCoord(y) then
+		x, y = UnquantizeCoord(x), UnquantizeCoord(y)
+	end
+	return x, y
+end
+
 function Draw.LoadRouteData(lines, points)
 	Draw.Clear()
 	for _, l in ipairs(lines or {}) do
-		local x1, y1, x2, y2 = l[1], l[2], l[3], l[4]
-		if IsQuantizedCoord(x1) or IsQuantizedCoord(y1) or IsQuantizedCoord(x2) or IsQuantizedCoord(y2) then
-			x1, y1, x2, y2 = UnquantizeCoord(x1), UnquantizeCoord(y1), UnquantizeCoord(x2), UnquantizeCoord(y2)
-		end
-		local color
-		if l[6] and l[7] then
-			color = { l[5], l[6], l[7], DEFAULT_LINE_COLOR[4] }
-		elseif l[5] and LINE_COLORS[l[5]] then
-			local c = LINE_COLORS[l[5]]
-			color = { c[1], c[2], c[3], DEFAULT_LINE_COLOR[4] }
-		end
+		local x1, y1, x2, y2, color = Draw.NormalizeLineData(l)
 		CreateLineWidget(x1, y1, x2, y2, AllocateStrokeId(), color)
 	end
 	for _, p in ipairs(points or {}) do
-		local x, y = p.x, p.y
-		if IsQuantizedCoord(x) or IsQuantizedCoord(y) then
-			x, y = UnquantizeCoord(x), UnquantizeCoord(y)
-		end
+		local x, y = Draw.NormalizePointData(p)
 		CreatePointWidget(x, y, p.title, p.text, p.icon)
 	end
 end
