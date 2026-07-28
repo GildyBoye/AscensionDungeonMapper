@@ -5,20 +5,12 @@ DR.MapTexture = {}
 local TILE_COLS, TILE_ROWS = 4, 3
 local NUM_TILES = TILE_COLS * TILE_ROWS
 
-local function EnsureWidgets(canvasFrame)
+local function CreateWidgets(canvasFrame)
 	if canvasFrame.dr_tiles then return end
 
 	canvasFrame.dr_tiles = {}
 	for i = 1, NUM_TILES do
-		local tex = canvasFrame:CreateTexture(nil, "BACKGROUND")
-		local col = (i - 1) % TILE_COLS
-		local row = math.floor((i - 1) / TILE_COLS)
-		tex:SetPoint("TOPLEFT", canvasFrame, "TOPLEFT",
-			col * (canvasFrame:GetWidth() / TILE_COLS),
-			-row * (canvasFrame:GetHeight() / TILE_ROWS))
-		tex:SetWidth(canvasFrame:GetWidth() / TILE_COLS)
-		tex:SetHeight(canvasFrame:GetHeight() / TILE_ROWS)
-		canvasFrame.dr_tiles[i] = tex
+		canvasFrame.dr_tiles[i] = canvasFrame:CreateTexture(nil, "BACKGROUND")
 	end
 
 	local placeholderBG = canvasFrame:CreateTexture(nil, "BACKGROUND")
@@ -32,23 +24,54 @@ local function EnsureWidgets(canvasFrame)
 		local vLine = canvasFrame:CreateTexture(nil, "ARTWORK")
 		vLine:SetTexture(1, 1, 1, 0.06)
 		vLine:SetWidth(1)
-		vLine:SetPoint("TOPLEFT", canvasFrame, "TOPLEFT", (i / GRID_DIVISIONS) * canvasFrame:GetWidth(), 0)
-		vLine:SetPoint("BOTTOMLEFT", canvasFrame, "BOTTOMLEFT", (i / GRID_DIVISIONS) * canvasFrame:GetWidth(), 0)
 		canvasFrame.dr_gridLines[#canvasFrame.dr_gridLines + 1] = vLine
 
 		local hLine = canvasFrame:CreateTexture(nil, "ARTWORK")
 		hLine:SetTexture(1, 1, 1, 0.06)
 		hLine:SetHeight(1)
-		hLine:SetPoint("TOPLEFT", canvasFrame, "TOPLEFT", 0, -(i / GRID_DIVISIONS) * canvasFrame:GetHeight())
-		hLine:SetPoint("TOPRIGHT", canvasFrame, "TOPRIGHT", 0, -(i / GRID_DIVISIONS) * canvasFrame:GetHeight())
 		canvasFrame.dr_gridLines[#canvasFrame.dr_gridLines + 1] = hLine
 	end
 
 	local msg = canvasFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-	msg:SetPoint("TOP", canvasFrame, "TOP", 0, -12)
-	msg:SetWidth(canvasFrame:GetWidth() - 40)
 	msg:SetJustifyH("CENTER")
 	canvasFrame.dr_placeholderMsg = msg
+end
+
+local function PositionWidgets(canvasFrame)
+	local w, h = canvasFrame:GetWidth(), canvasFrame:GetHeight()
+
+	for i = 1, NUM_TILES do
+		local col = (i - 1) % TILE_COLS
+		local row = math.floor((i - 1) / TILE_COLS)
+		local tex = canvasFrame.dr_tiles[i]
+		tex:ClearAllPoints()
+		tex:SetPoint("TOPLEFT", canvasFrame, "TOPLEFT", col * (w / TILE_COLS), -row * (h / TILE_ROWS))
+		tex:SetWidth(w / TILE_COLS)
+		tex:SetHeight(h / TILE_ROWS)
+	end
+
+	local GRID_DIVISIONS = 8
+	for i = 1, GRID_DIVISIONS - 1 do
+		local vLine = canvasFrame.dr_gridLines[i * 2 - 1]
+		vLine:ClearAllPoints()
+		vLine:SetPoint("TOPLEFT", canvasFrame, "TOPLEFT", (i / GRID_DIVISIONS) * w, 0)
+		vLine:SetPoint("BOTTOMLEFT", canvasFrame, "BOTTOMLEFT", (i / GRID_DIVISIONS) * w, 0)
+
+		local hLine = canvasFrame.dr_gridLines[i * 2]
+		hLine:ClearAllPoints()
+		hLine:SetPoint("TOPLEFT", canvasFrame, "TOPLEFT", 0, -(i / GRID_DIVISIONS) * h)
+		hLine:SetPoint("TOPRIGHT", canvasFrame, "TOPRIGHT", 0, -(i / GRID_DIVISIONS) * h)
+	end
+
+	local msg = canvasFrame.dr_placeholderMsg
+	msg:ClearAllPoints()
+	msg:SetPoint("TOP", canvasFrame, "TOP", 0, -12)
+	msg:SetWidth(w - 40)
+end
+
+local function EnsureWidgets(canvasFrame)
+	CreateWidgets(canvasFrame)
+	PositionWidgets(canvasFrame)
 end
 
 local function HideRealTiles(canvasFrame)

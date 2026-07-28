@@ -39,6 +39,8 @@ DR.Dungeons = {
 		{ key = "diremaul_east", name = "Dire Maul: East", kind = "dungeon", levelRange = "55-60", parentKey = "diremaul", level = 5, maxLevel = 6 },
 		{ key = "scholomance", name = "Scholomance", kind = "dungeon", levelRange = "58-60" },
 		{ key = "stratholme", name = "Stratholme", kind = "dungeon", levelRange = "58-60" },
+		{ key = "roadtodeotherside", name = "Road to De Other Side", kind = "dungeon", levelRange = "15-60" },
+		{ key = "vaultsoftheinquisition", name = "Vaults of the Inquisition", kind = "dungeon", levelRange = "15-60" },
 		{ key = "moltencore", name = "Molten Core", kind = "raid", levelRange = "60" },
 		{ key = "onyxialair", name = "Onyxia's Lair", kind = "raid", levelRange = "60" },
 		{ key = "blackwinglair", name = "Blackwing Lair", kind = "raid", levelRange = "60" },
@@ -156,6 +158,8 @@ DR.DefaultMapIDs = {
 	zulgurub = 697,
 	ruinsofahnqiraj = 717,
 	templeofahnqiraj = 766,
+	roadtodeotherside = 2033,
+	vaultsoftheinquisition = 2032,
 
 	hellfireramparts = 797,
 	bloodfurnace = 725,

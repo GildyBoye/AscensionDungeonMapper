@@ -16,8 +16,13 @@ local currentEra = "Classic"
 local currentDungeonKey = nil
 local currentLevel = 0
 local currentRouteName = nil
+local currentRouteLevels = {}
 local dirty = false
 local pendingDiscardAction
+
+function DR.UI.GetOpenRoute()
+	return currentDungeonKey, currentRouteName, currentLevel
+end
 
 local headerDungeonText, headerRouteText, levelText, levelPrev, levelNext
 local pointEditorFrame
@@ -127,6 +132,7 @@ local function DoSelectDungeonNow(key)
 	local known = DR.GetKnownMap(mapKey)
 	currentLevel = info.level or ((known and known.numLevels and known.numLevels > 0) and 1 or 0)
 	currentRouteName = nil
+	currentRouteLevels = {}
 	dirty = false
 
 	headerDungeonText:SetText(info.name)
@@ -255,6 +261,7 @@ local function DoSetEraNow(era)
 	currentEra = era
 	currentDungeonKey = nil
 	currentRouteName = nil
+	currentRouteLevels = {}
 	dirty = false
 	headerDungeonText:SetText("Select a dungeon or raid on the left")
 	headerRouteText:SetText("")
@@ -308,8 +315,14 @@ local function ChangeLevel(delta)
 	minLevel, maxLevel = minLevel or 1, maxLevel or known.numLevels
 	local newLevel = currentLevel + delta
 	if newLevel < minLevel or newLevel > maxLevel then return end
+
+	local lines, points = DR.DrawEngine.GetRouteData()
+	currentRouteLevels[currentLevel] = { lines = lines, points = points }
+
 	currentLevel = newLevel
 	DR.MapTexture.Build(canvas, mapKey, currentLevel)
+	local lvl = currentRouteLevels[currentLevel] or { lines = {}, points = {} }
+	DR.DrawEngine.LoadRouteData(lvl.lines, lvl.points)
 	DR.UI.UpdateLevelDisplay()
 end
 
@@ -322,9 +335,11 @@ function DR.UI.LoadRoute(name)
 		local info = DR.DungeonByKey[currentDungeonKey]
 		currentRouteName = name
 		currentLevel = data.level or info.level or 0
+		currentRouteLevels = DR.NormalizeRouteLevels(data)
 		dirty = false
 		DR.MapTexture.Build(canvas, info.parentKey or currentDungeonKey, currentLevel)
-		DR.DrawEngine.LoadRouteData(data.lines, data.points)
+		local lvl = currentRouteLevels[currentLevel] or { lines = {}, points = {} }
+		DR.DrawEngine.LoadRouteData(lvl.lines, lvl.points)
 		DR.UI.UpdateLevelDisplay()
 		headerRouteText:SetText("Route: " .. name .. " (by " .. (data.author or "?") .. ")")
 		RefreshRouteBox()
@@ -341,6 +356,7 @@ local function SaveCurrentRoute(silent)
 		return
 	end
 	local lines, points = DR.DrawEngine.GetRouteData()
+	currentRouteLevels[currentLevel] = { lines = lines, points = points }
 	local existing = DR.GetRoutesForDungeon(currentDungeonKey)[currentRouteName]
 	local playerName = UnitName("player") or "Unknown"
 	local realmName = GetRealmName() or ""
@@ -349,8 +365,7 @@ local function SaveCurrentRoute(silent)
 		level = currentLevel,
 		created = (existing and existing.created) or time(),
 		updated = time(),
-		lines = lines,
-		points = points,
+		levels = currentRouteLevels,
 	}
 	DR.SaveRoute(currentDungeonKey, currentRouteName, routeData)
 	dirty = false
@@ -577,8 +592,7 @@ local function BuildPointEditor()
 			editingEntry.title = f.titleBox:GetText()
 			editingEntry.text = f.descBox:GetText()
 			editingEntry.SetIcon(f.iconRow.selected)
-			dirty = true
-			MaybeAutoSave()
+			DR.DrawEngine.NotifyChange()
 		end
 		f:Hide()
 	end)
@@ -677,8 +691,7 @@ StaticPopupDialogs["ASCENSIONDUNGEONMAPPER_CONFIRM_CLEAR"] = {
 	button2 = CANCEL,
 	OnAccept = function()
 		DR.DrawEngine.Clear()
-		dirty = true
-		MaybeAutoSave()
+		DR.DrawEngine.NotifyChange()
 	end,
 	timeout = 0,
 	whileDead = true,
@@ -836,13 +849,13 @@ end
 
 local function BuildCurrentRouteData()
 	local lines, points = DR.DrawEngine.GetRouteData()
+	currentRouteLevels[currentLevel] = { lines = lines, points = points }
 	return {
 		author = (UnitName("player") or "Unknown") .. "-" .. (GetRealmName() or ""),
 		level = currentLevel,
 		created = time(),
 		updated = time(),
-		lines = lines,
-		points = points,
+		levels = currentRouteLevels,
 	}
 end
 
@@ -971,69 +984,15 @@ local function BuildColorPicker(parentCanvas)
 end
 
 local PREVIEW_W, PREVIEW_H = 260, 170
-local previewLineTexs = {}
-local previewPointTexs = {}
 
 local function RenderSharePreview(previewFrame, routeData)
-	for _, t in ipairs(previewLineTexs) do t:Hide() end
-	for _, t in ipairs(previewPointTexs) do t:Hide() end
-
-	local lineCount = 0
-	for _, l in ipairs(routeData.lines or {}) do
-		local x1, y1, x2, y2, color = DR.DrawEngine.NormalizeLineData(l)
-		lineCount = lineCount + 1
-		local tex = previewLineTexs[lineCount]
-		if not tex then
-			tex = previewFrame:CreateTexture(nil, "ARTWORK")
-			previewLineTexs[lineCount] = tex
-		end
-		tex:SetTexture(color[1], color[2], color[3], color[4])
-		local px1, py1 = x1 * PREVIEW_W, y1 * PREVIEW_H
-		local px2, py2 = x2 * PREVIEW_W, y2 * PREVIEW_H
-		local midx, midy = (px1 + px2) / 2, (py1 + py2) / 2
-		local dx, dy = px2 - px1, py2 - py1
-		local length = math.sqrt(dx * dx + dy * dy)
-		if length < 1 then length = 1 end
-		local angle = math.atan2(-dy, dx)
-		tex:ClearAllPoints()
-		tex:SetPoint("CENTER", previewFrame, "TOPLEFT", midx, -midy)
-		tex:SetWidth(length)
-		tex:SetHeight(1.5)
-		tex:SetRotation(angle)
-		tex:Show()
+	local levels = DR.NormalizeRouteLevels(routeData)
+	local lvl = levels[routeData.level or 0]
+	if not lvl then
+		local _, anyLevel = next(levels)
+		lvl = anyLevel or { lines = {}, points = {} }
 	end
-
-	local pointCount = 0
-	for _, p in ipairs(routeData.points or {}) do
-		local x, y = DR.DrawEngine.NormalizePointData(p)
-		pointCount = pointCount + 1
-		local tex = previewPointTexs[pointCount]
-		if not tex then
-			tex = previewFrame:CreateTexture(nil, "OVERLAY")
-			previewPointTexs[pointCount] = tex
-		end
-		local def = p.icon and DR.DrawEngine.POINT_ICONS[p.icon]
-		if not def then
-			tex:SetTexture(0.95, 0.25, 0.2, 1)
-			tex:SetTexCoord(0, 1, 0, 1)
-		elseif def.color then
-			tex:SetTexture(def.color[1], def.color[2], def.color[3], 1)
-			tex:SetTexCoord(0, 1, 0, 1)
-		else
-			tex:SetTexture(def.texture)
-			local tc = def.texCoord
-			if tc then
-				tex:SetTexCoord(tc[1], tc[2], tc[3], tc[4])
-			else
-				tex:SetTexCoord(0, 1, 0, 1)
-			end
-		end
-		tex:SetWidth(8)
-		tex:SetHeight(8)
-		tex:ClearAllPoints()
-		tex:SetPoint("CENTER", previewFrame, "TOPLEFT", x * PREVIEW_W, -(y * PREVIEW_H))
-		tex:Show()
-	end
+	DR.DrawEngine.RenderStatic(previewFrame, PREVIEW_W, PREVIEW_H, lvl.lines, lvl.points, 1.5, 8)
 end
 
 local sharePreviewDialog
@@ -1207,16 +1166,16 @@ local function BuildMainFrame()
 
 	DR.DrawEngine.Init(canvas)
 	DR.DrawEngine.onPointClick = OpenPointEditor
-	DR.DrawEngine.onChange = function()
+	DR.DrawEngine.AddChangeListener(function()
 		dirty = true
 		MaybeAutoSave()
-	end
+	end)
 
 	local colorPicker = BuildColorPicker(canvas)
 
 	local TOOL_BUTTON_SIZE = 48
 	local TOOL_GAP = 6
-	local toolRowWidth = TOOL_BUTTON_SIZE * 3 + TOOL_GAP * 2
+	local toolRowWidth = TOOL_BUTTON_SIZE * 4 + TOOL_GAP * 3
 	local toolRowX = (CANVAS_W - toolRowWidth) / 2
 	local undoClearWidth = 70 * 2 + TOOL_GAP
 	local undoClearX = (CANVAS_W - undoClearWidth) / 2
@@ -1243,14 +1202,15 @@ local function BuildMainFrame()
 			end
 			local activeMode = DR.DrawEngine.GetMode()
 			SetModeButtonHighlight(activeMode)
-			if activeMode == "line" then colorPicker:Show() else colorPicker:Hide() end
+			if activeMode == "line" or activeMode == "polyline" then colorPicker:Show() else colorPicker:Hide() end
 		end)
 		modeButtons[mode] = btn
 		return btn
 	end
 
 	local lineBtn = ModeButton("Draw", "line")
-	local pointBtn = ModeButton("Marker", "point", lineBtn)
+	local polylineBtn = ModeButton("Line", "polyline", lineBtn)
+	local pointBtn = ModeButton("Marker", "point", polylineBtn)
 	local eraseBtn = ModeButton("Erase", "erase", pointBtn)
 
 	local undoBtn = CreateActionButton(toolbar, "Undo", 70)

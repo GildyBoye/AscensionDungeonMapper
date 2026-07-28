@@ -22,8 +22,6 @@ local shareOrder = {}
 local lastFulfilledFrom = {}
 local lastAnnouncedFrom = {}
 
-math.randomseed(time())
-
 local ID_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 local function RandomShareID()
 	local parts = {}

@@ -73,6 +73,9 @@ local lastX, lastY
 
 local erasing = false
 
+local polylineAnchor
+local polylineIndicator
+
 local function GetNormalizedCursorPos()
 	local scale = canvas:GetEffectiveScale()
 	local cx, cy = GetCursorPosition()
@@ -284,13 +287,49 @@ local function CreatePointWidget(x, y, title, text, icon)
 end
 
 Draw.onPointClick = nil
-Draw.onChange = nil
+
+local changeListeners = {}
+function Draw.AddChangeListener(fn)
+	changeListeners[#changeListeners + 1] = fn
+end
+local function FireChange()
+	for _, fn in ipairs(changeListeners) do
+		fn()
+	end
+end
+Draw.NotifyChange = FireChange
+
+local function SetPolylineAnchor(x, y)
+	polylineAnchor = { x = x, y = y }
+	if not polylineIndicator then
+		local tex = canvas:CreateTexture(nil, "OVERLAY")
+		tex:SetWidth(8)
+		tex:SetHeight(8)
+		tex:SetTexture(1, 1, 1, 0.9)
+		polylineIndicator = tex
+	end
+	local w, h = canvas:GetWidth(), canvas:GetHeight()
+	polylineIndicator:ClearAllPoints()
+	polylineIndicator:SetPoint("CENTER", canvas, "TOPLEFT", x * w, -(y * h))
+	polylineIndicator:Show()
+end
+
+local function ClearPolylineAnchor()
+	polylineAnchor = nil
+	if polylineIndicator then polylineIndicator:Hide() end
+end
 
 function Draw.Init(canvasFrame)
 	canvas = canvasFrame
 	canvas:EnableMouse(true)
 
 	canvas:SetScript("OnMouseDown", function(self, button)
+		if button == "RightButton" then
+			if mode == "polyline" then
+				ClearPolylineAnchor()
+			end
+			return
+		end
 		if button ~= "LeftButton" then return end
 		if mode == "line" then
 			local x, y = GetNormalizedCursorPos()
@@ -303,10 +342,20 @@ function Draw.Init(canvasFrame)
 			local x, y = GetNormalizedCursorPos()
 			local entry = CreatePointWidget(ClampNorm(x), ClampNorm(y), "", "", nil)
 			history[#history + 1] = { kind = "point", entry = entry }
-			if Draw.onChange then Draw.onChange() end
+			FireChange()
 			if Draw.onPointClick then
 				Draw.onPointClick(entry)
 			end
+		elseif mode == "polyline" then
+			local x, y = GetNormalizedCursorPos()
+			x, y = ClampNorm(x), ClampNorm(y)
+			if polylineAnchor then
+				local strokeId = AllocateStrokeId()
+				DrawSteppedSegment(polylineAnchor.x, polylineAnchor.y, x, y, strokeId, currentLineColor)
+				history[#history + 1] = { kind = "stroke", strokeId = strokeId }
+				FireChange()
+			end
+			SetPolylineAnchor(x, y)
 		elseif mode == "erase" then
 			erasing = true
 			eraseSessionLines = {}
@@ -346,7 +395,7 @@ function Draw.Init(canvasFrame)
 			end
 			if strokeHasSegment then
 				history[#history + 1] = { kind = "stroke", strokeId = currentStrokeId }
-				if Draw.onChange then Draw.onChange() end
+				FireChange()
 			end
 			painting = false
 			currentStrokeId = nil
@@ -354,7 +403,7 @@ function Draw.Init(canvasFrame)
 			erasing = false
 			if eraseSessionLines and (#eraseSessionLines > 0 or #eraseSessionPoints > 0) then
 				history[#history + 1] = { kind = "erase", lines = eraseSessionLines, points = eraseSessionPoints }
-				if Draw.onChange then Draw.onChange() end
+				FireChange()
 			end
 			eraseSessionLines = nil
 			eraseSessionPoints = nil
@@ -369,6 +418,7 @@ function Draw.SetMode(newMode)
 	erasing = false
 	eraseSessionLines = nil
 	eraseSessionPoints = nil
+	ClearPolylineAnchor()
 end
 
 function Draw.GetMode()
@@ -393,7 +443,7 @@ function Draw.DeletePoint(entry)
 		{ x = entry.x, y = entry.y, title = entry.title, text = entry.text, icon = entry.icon },
 	} }
 	Draw.RemovePoint(entry)
-	if Draw.onChange then Draw.onChange() end
+	FireChange()
 end
 
 function Draw.RemoveStrokeById(strokeId)
@@ -426,7 +476,7 @@ function Draw.Undo()
 			CreatePointWidget(p.x, p.y, p.title, p.text, p.icon)
 		end
 	end
-	if Draw.onChange then Draw.onChange() end
+	FireChange()
 end
 
 function Draw.Clear()
@@ -440,6 +490,7 @@ function Draw.Clear()
 	erasing = false
 	eraseSessionLines = nil
 	eraseSessionPoints = nil
+	ClearPolylineAnchor()
 end
 
 function Draw.RelayoutAll()
@@ -507,5 +558,77 @@ function Draw.LoadRouteData(lines, points)
 	for _, p in ipairs(points or {}) do
 		local x, y = Draw.NormalizePointData(p)
 		CreatePointWidget(x, y, p.title, p.text, p.icon)
+	end
+end
+
+local staticPools = setmetatable({}, { __mode = "k" })
+
+function Draw.RenderStatic(targetFrame, width, height, lines, points, lineThickness, pointSize)
+	lineThickness = lineThickness or 1.5
+	pointSize = pointSize or 8
+
+	local pool = staticPools[targetFrame]
+	if not pool then
+		pool = { lineTexs = {}, pointTexs = {} }
+		staticPools[targetFrame] = pool
+	end
+
+	for _, t in ipairs(pool.lineTexs) do t:Hide() end
+	for _, t in ipairs(pool.pointTexs) do t:Hide() end
+
+	local lineCount = 0
+	for _, l in ipairs(lines or {}) do
+		local x1, y1, x2, y2, color = Draw.NormalizeLineData(l)
+		lineCount = lineCount + 1
+		local tex = pool.lineTexs[lineCount]
+		if not tex then
+			tex = targetFrame:CreateTexture(nil, "ARTWORK")
+			pool.lineTexs[lineCount] = tex
+		end
+		tex:SetTexture(color[1], color[2], color[3], color[4])
+		local px1, py1 = x1 * width, y1 * height
+		local px2, py2 = x2 * width, y2 * height
+		local midx, midy = (px1 + px2) / 2, (py1 + py2) / 2
+		local dx, dy = px2 - px1, py2 - py1
+		local length = math.sqrt(dx * dx + dy * dy)
+		if length < 1 then length = 1 end
+		local angle = math.atan2(-dy, dx)
+		tex:ClearAllPoints()
+		tex:SetPoint("CENTER", targetFrame, "TOPLEFT", midx, -midy)
+		tex:SetWidth(length)
+		tex:SetHeight(lineThickness)
+		tex:SetRotation(angle)
+		tex:Show()
+	end
+
+	local pointCount = 0
+	for _, p in ipairs(points or {}) do
+		local x, y = Draw.NormalizePointData(p)
+		pointCount = pointCount + 1
+		local tex = pool.pointTexs[pointCount]
+		if not tex then
+			tex = targetFrame:CreateTexture(nil, "OVERLAY")
+			pool.pointTexs[pointCount] = tex
+		end
+		local def = p.icon and POINT_ICONS[p.icon]
+		if not def then
+			tex:SetTexture(POINT_COLOR[1], POINT_COLOR[2], POINT_COLOR[3], POINT_COLOR[4])
+			tex:SetTexCoord(0, 1, 0, 1)
+		elseif def.color then
+			tex:SetTexture(def.color[1], def.color[2], def.color[3], 1)
+			tex:SetTexCoord(0, 1, 0, 1)
+		else
+			tex:SetTexture(def.texture)
+			if def.texCoord then
+				tex:SetTexCoord(def.texCoord[1], def.texCoord[2], def.texCoord[3], def.texCoord[4])
+			else
+				tex:SetTexCoord(0, 1, 0, 1)
+			end
+		end
+		tex:SetWidth(pointSize)
+		tex:SetHeight(pointSize)
+		tex:ClearAllPoints()
+		tex:SetPoint("CENTER", targetFrame, "TOPLEFT", x * width, -(y * height))
+		tex:Show()
 	end
 end

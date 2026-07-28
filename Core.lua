@@ -17,6 +17,14 @@ function DR.StripFormatting(s)
 	return (s:gsub("|", ""))
 end
 
+function DR.NormalizeRouteLevels(routeData)
+	if type(routeData.levels) == "table" then
+		return routeData.levels
+	end
+	local lvl = routeData.level or 0
+	return { [lvl] = { lines = routeData.lines or {}, points = routeData.points or {} } }
+end
+
 local function InitializeSavedVariables()
 	if type(AscensionDungeonMapperDB) ~= "table" then
 		AscensionDungeonMapperDB = {}

@@ -8,6 +8,7 @@ local MAX_INPUT_LEN = 100000
 local MAX_DECOMPRESSED_LEN = 200000
 local MAX_LINES = 5000
 local MAX_POINTS = 500
+local MAX_ROUTE_LEVELS = 20
 
 local function TrimString(s)
 	return s:match("^%s*(.-)%s*$")
@@ -88,18 +89,31 @@ function DR.ShareExport.Import(str)
 		return false, nil, nil, nil, "this route is for a dungeon this addon version doesn't know about"
 	end
 
-	package.rd.lines = package.rd.lines or {}
-	package.rd.points = package.rd.points or {}
-
-	if #package.rd.lines > MAX_LINES or #package.rd.points > MAX_POINTS then
-		return false, nil, nil, nil, "this route has an implausible number of lines/points"
+	local levels = DR.NormalizeRouteLevels(package.rd)
+	local levelCount = 0
+	for _, lvl in pairs(levels) do
+		levelCount = levelCount + 1
+		if levelCount > MAX_ROUTE_LEVELS then
+			return false, nil, nil, nil, "this route has an implausible number of levels"
+		end
+		if type(lvl) ~= "table" then
+			return false, nil, nil, nil, "corrupt route data"
+		end
+		lvl.lines = lvl.lines or {}
+		lvl.points = lvl.points or {}
+		if #lvl.lines > MAX_LINES or #lvl.points > MAX_POINTS then
+			return false, nil, nil, nil, "this route has an implausible number of lines/points"
+		end
+		for _, p in ipairs(lvl.points) do
+			p.title = DR.StripFormatting(p.title)
+			p.text = DR.StripFormatting(p.text)
+		end
 	end
+	package.rd.levels = levels
+	package.rd.lines = nil
+	package.rd.points = nil
 
 	package.rn = DR.StripFormatting(package.rn)
-	for _, p in ipairs(package.rd.points) do
-		p.title = DR.StripFormatting(p.title)
-		p.text = DR.StripFormatting(p.text)
-	end
 
 	return true, package.dk, package.rn, package.rd
 end
