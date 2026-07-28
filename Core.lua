@@ -12,12 +12,6 @@ function DR.Trim(s)
 	return (s or ""):match("^%s*(.-)%s*$")
 end
 
--- Strips WoW's "|"-prefixed formatting/hyperlink escape codes. Applied to
--- any free-text field coming from an untrusted import (route name, marker
--- title/text) before it's saved, since those fields get displayed through
--- SetText/GameTooltip calls that interpret those codes -- without this, a
--- crafted route name could fake colored "system" text or fake links in
--- whoever previews or imports it.
 function DR.StripFormatting(s)
 	if type(s) ~= "string" then return "" end
 	return (s:gsub("|", ""))

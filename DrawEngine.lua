@@ -49,13 +49,6 @@ local function IsQuantizedCoord(v)
 end
 
 local MIN_SEGMENT_DIST = 0.008
-
--- Caps how long a single drawn segment can be. Fast drags can move the
--- cursor a long way between two OnUpdate samples, and a single very long,
--- thin, steeply-angled rotated bar renders badly (shows up as sparse
--- horizontal-looking dashes instead of a solid line). Splitting a big jump
--- into several shorter segments along the same straight path avoids that
--- and also fills in what would otherwise be a visible gap.
 local MAX_STEP_DIST = 0.01
 
 local ERASE_TOLERANCE_PX = 6
@@ -158,9 +151,6 @@ local function DistPointToSegmentPx(px, py, x1, y1, x2, y2)
 	return math.sqrt(ddx * ddx + ddy * ddy)
 end
 
--- Removes exactly one segment (by index), not the whole stroke it came from
--- -- classic eraser behavior, removes only what you actually drag over.
--- Returns the removed segment's data so the caller can record it for undo.
 local function RemoveLineSegmentAt(index)
 	local l = lineWidgets[index]
 	l.tex:Hide()
@@ -170,16 +160,9 @@ end
 
 local POINT_ERASE_RADIUS_PX = 14
 
--- Set for the duration of one erase gesture (mouse-down to mouse-up) so
--- EraseNear can accumulate what it removed; nil the rest of the time.
 local eraseSessionLines
 local eraseSessionPoints
 
--- Erases every line segment and every point within tolerance of (x, y),
--- normalized canvas coordinates. Called continuously while dragging in
--- erase mode, so a drag sweeps out an eraser path rather than needing one
--- precise click per item. Whatever it removes gets recorded into the
--- current erase session so the whole gesture can be undone as one action.
 local function EraseNear(x, y)
 	for i = #lineWidgets, 1, -1 do
 		local l = lineWidgets[i]
@@ -203,9 +186,6 @@ local function EraseNear(x, y)
 	end
 end
 
--- Every selectable marker icon, in a fixed order so existing saved/shared
--- points (which store just an index into this list) keep pointing at the
--- same icon after this list grows. Only append, never reorder/remove.
 local POINT_ICONS = {}
 for i = 1, 8 do
 	POINT_ICONS[#POINT_ICONS + 1] = {
@@ -214,9 +194,6 @@ for i = 1, 8 do
 	}
 end
 
--- Coordinates match Blizzard's own FrameXML usage of this texture
--- (LFGFrame.lua), a 64x64 sheet -- not a uniform grid, so these can't be
--- derived, only copied from the source.
 local ROLE_ICON_TEXTURE = "Interface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES"
 local ROLES = {
 	{ name = "Tank", texCoord = { 0 / 64, 19 / 64, 22 / 64, 41 / 64 } },
@@ -296,9 +273,6 @@ local function CreatePointWidget(x, y, title, text, icon)
 
 	frame:SetScript("OnClick", function(self)
 		if mode == "erase" then
-			-- A direct click on the point's own button bypasses the canvas's
-			-- drag-erase session entirely, so this goes through DeletePoint
-			-- to keep Undo consistent regardless of which path removed it.
 			Draw.DeletePoint(entry)
 		elseif Draw.onPointClick then
 			Draw.onPointClick(entry)
@@ -310,12 +284,6 @@ local function CreatePointWidget(x, y, title, text, icon)
 end
 
 Draw.onPointClick = nil
-
--- Fired after any action that changes what a saved route would contain (a
--- completed stroke, a placed point, an erase, an undo) -- used by the UI to
--- drive auto-save. Called via the Draw table field (not a local) so
--- earlier-defined closures in this file can still reach it. Deliberately
--- NOT fired by Draw.Clear -- see the comment on that function.
 Draw.onChange = nil
 
 function Draw.Init(canvasFrame)
@@ -351,11 +319,6 @@ function Draw.Init(canvasFrame)
 	canvas:SetScript("OnUpdate", function(self)
 		if mode == "line" and painting then
 			local x, y = GetNormalizedCursorPos()
-			-- Ignore samples taken while the cursor has drifted off the
-			-- canvas (easy to do on a fast drag, especially vertically since
-			-- the canvas is shorter than it is wide) instead of clamping to
-			-- the edge -- clamping was smearing a segment along whichever
-			-- border got overshot.
 			if InCanvas(x, y) then
 				local dx, dy = x - lastX, y - lastY
 				if math.sqrt(dx * dx + dy * dy) >= MIN_SEGMENT_DIST then
@@ -425,10 +388,6 @@ function Draw.RemovePoint(entry)
 	end
 end
 
--- Removes a point WITH an undo-able history entry and an onChange
--- notification -- the one true way to delete a single point, shared by the
--- erase-mode direct click and the point editor's Delete Marker button, so
--- both behave identically (a plain Draw.RemovePoint call bypasses undo).
 function Draw.DeletePoint(entry)
 	history[#history + 1] = { kind = "erase", lines = {}, points = {
 		{ x = entry.x, y = entry.y, title = entry.title, text = entry.text, icon = entry.icon },
@@ -460,9 +419,6 @@ function Draw.Undo()
 	elseif last.kind == "point" then
 		Draw.RemovePoint(last.entry)
 	elseif last.kind == "erase" then
-		-- Restores exactly what one erase gesture removed. Restored items
-		-- get fresh stroke IDs -- they're independently erasable again,
-		-- same as anything freshly drawn.
 		for _, l in ipairs(last.lines) do
 			CreateLineWidget(l.x1, l.y1, l.x2, l.y2, AllocateStrokeId(), l.color)
 		end
@@ -473,12 +429,6 @@ function Draw.Undo()
 	if Draw.onChange then Draw.onChange() end
 end
 
--- Deliberately does NOT fire onChange -- it's also used to blank the canvas
--- before naming a brand new route (see the "New Route" button), and firing
--- auto-save there would silently overwrite the previously loaded route with
--- an empty one before the new name is even picked. Callers that clear an
--- already-named route in place (the Clear toolbar button) trigger auto-save
--- themselves after calling this.
 function Draw.Clear()
 	for _, l in ipairs(lineWidgets) do l.tex:Hide() end
 	for _, p in ipairs(pointWidgets) do p.frame:Hide(); p.frame:SetParent(nil) end
@@ -525,10 +475,6 @@ function Draw.GetRouteData()
 	return lines, points
 end
 
--- Pure decode helpers -- no canvas/widget side effects, safe to call from
--- anywhere (e.g. a static preview renderer) that just wants to know what a
--- stored line/point actually means, across every format generation this
--- addon has ever written.
 function Draw.NormalizeLineData(l)
 	local x1, y1, x2, y2 = l[1], l[2], l[3], l[4]
 	if IsQuantizedCoord(x1) or IsQuantizedCoord(y1) or IsQuantizedCoord(x2) or IsQuantizedCoord(y2) then

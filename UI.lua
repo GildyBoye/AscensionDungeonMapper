@@ -111,10 +111,6 @@ local function SetModeButtonHighlight(activeMode)
 	end
 end
 
--- If there's an unsaved edit sitting on the canvas, defers `action` behind a
--- confirmation popup instead of just letting it get silently discarded by
--- whatever's about to clear/replace the canvas (switching dungeons,
--- starting a new route, accepting an imported/shared route).
 local function ConfirmIfDirty(action)
 	if dirty then
 		pendingDiscardAction = action
@@ -162,9 +158,6 @@ local function DoSelectDungeonNow(key)
 	RefreshRouteBox()
 end
 
--- `onComplete` runs after the switch actually happens -- callers that need
--- to do something right after (like loading a specific route) can't just
--- run it inline anymore, since this may now be waiting on a confirm popup.
 local function SelectDungeon(key, onComplete)
 	ConfirmIfDirty(function()
 		DoSelectDungeonNow(key)
@@ -321,9 +314,6 @@ local function ChangeLevel(delta)
 end
 
 function DR.UI.LoadRoute(name)
-	-- Guarded for the direct "click a different saved route" path; the two
-	-- internal callers (DoSelectDungeonNow, ImportParsedRoute) always reach
-	-- this with dirty already false, so this never double-prompts them.
 	ConfirmIfDirty(function()
 		if not currentDungeonKey then return end
 		local routes = DR.GetRoutesForDungeon(currentDungeonKey)
@@ -705,9 +695,6 @@ StaticPopupDialogs["ASCENSIONDUNGEONMAPPER_CONFIRM_DELETE"] = {
 	hideOnEscape = true,
 }
 
--- Shared by manual paste-import and accepting a chat-shared route: given an
--- already-parsed/validated route, rename on collision, respect the
--- per-dungeon cap, save it, and switch the UI to show it.
 function DR.UI.ImportParsedRoute(dungeonKey, routeName, routeData, sourceLabel)
 	local existingRoutes = DR.GetRoutesForDungeon(dungeonKey)
 	if existingRoutes[routeName] then
@@ -724,12 +711,6 @@ function DR.UI.ImportParsedRoute(dungeonKey, routeName, routeData, sourceLabel)
 	DR.SaveRoute(dungeonKey, routeName, routeData)
 
 	local info = DR.DungeonByKey[dungeonKey]
-	-- SetEra and SelectDungeon can each defer behind their own
-	-- unsaved-changes confirm popup, so this has to chain as continuations
-	-- rather than run inline -- and SetEra must go first and actually
-	-- finish (resetting dirty) before SelectDungeon's own check runs,
-	-- otherwise SelectDungeon could prompt again after the era switch
-	-- already discarded whatever was open.
 	SetEra(info.era, function()
 		SelectDungeon(dungeonKey, function()
 			DR.UI.LoadRoute(routeName)
@@ -853,8 +834,6 @@ local function OpenDiscordDialog()
 	OpenLinkDialog(discordDialog)
 end
 
--- Snapshot of the current canvas as a routeData table, used by both Export
--- and the chat-share buttons.
 local function BuildCurrentRouteData()
 	local lines, points = DR.DrawEngine.GetRouteData()
 	return {
@@ -991,10 +970,6 @@ local function BuildColorPicker(parentCanvas)
 	return picker
 end
 
--- Shared-route accept/decline popup: a small static preview (no
--- interactivity, just a sketch of the lines/markers) so the recipient can
--- see roughly what they're about to import before it touches their saved
--- routes.
 local PREVIEW_W, PREVIEW_H = 260, 170
 local previewLineTexs = {}
 local previewPointTexs = {}
@@ -1121,9 +1096,6 @@ DR.ShareChat.onRouteReceived = function(sender, dungeonKey, routeName, routeData
 	sharePreviewDialog:Show()
 end
 
--- Non-modal heads-up shown when someone else in the party/raid/guild
--- broadcasts a share announcement. Get kicks off the normal whisper-based
--- request, which eventually lands in onRouteReceived above.
 local shareToastDialog
 
 local function BuildShareToastDialog()
@@ -1351,11 +1323,6 @@ local function BuildMainFrame()
 		routeBoxSlots[i] = slot
 	end
 
-	-- Centered on the full canvas width, same as the Draw/Marker/Erase and
-	-- Undo/Clear rows above -- narrow enough now that Rename/Delete moved
-	-- out of this row that it still clears the route list on the left.
-	-- Vertically centered against the list's own region (not the taller
-	-- toolbar2, which now also has the Rename/Delete row above the list).
 	local row1Width = 100 + 6 + 70
 	local row2Width = 80 + 6 + 80
 	local row1X = (CANVAS_W - row1Width) / 2

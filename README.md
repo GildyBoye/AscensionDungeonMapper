@@ -12,7 +12,7 @@ WoW 3.3.5a addon for the [Ascension](https://ascension.gg) server. Draw and shar
 - Erase, Undo, Clear
 - Up to 5 saved routes per dungeon
 - Export/Import as a paste-able text string
-- Share to party/raid/guild — other addon users get a Get/Ignore prompt, then a preview before importing
+- Share to party/raid/guild, other addon users get a Get/Ignore prompt, then a preview before importing
 - Minimap icon to open/close
 
 ## Usage

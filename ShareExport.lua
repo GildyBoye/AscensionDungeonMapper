@@ -4,10 +4,6 @@ DR.ShareExport = {}
 
 local PREFIX = "DR1:"
 
--- Sane ceilings on untrusted input -- generous enough that no real route
--- ever gets close, but they cap the worst case (a deliberately oversized or
--- decompression-bomb-style paste/share) to something that can't hang or
--- crash the client trying to handle it.
 local MAX_INPUT_LEN = 100000
 local MAX_DECOMPRESSED_LEN = 200000
 local MAX_LINES = 5000
@@ -99,9 +95,6 @@ function DR.ShareExport.Import(str)
 		return false, nil, nil, nil, "this route has an implausible number of lines/points"
 	end
 
-	-- Strip formatting codes from every free-text field before it can reach
-	-- a SetText/GameTooltip call anywhere downstream -- this is untrusted
-	-- data, whether it arrived via a pasted string or a chat share.
 	package.rn = DR.StripFormatting(package.rn)
 	for _, p in ipairs(package.rd.points) do
 		p.title = DR.StripFormatting(p.title)

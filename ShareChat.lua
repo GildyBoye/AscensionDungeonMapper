@@ -46,10 +46,6 @@ local function EvictOldShares()
 	end
 end
 
--- Is `sender` currently a member of the group/guild this share was posted
--- to? Checked at fulfill time (not just at post time) so the audience is
--- re-verified against who you're grouped/guilded with right now, not who
--- could theoretically guess a valid ID.
 local function SenderStillEligible(sender, channel)
 	if channel == "GUILD" then
 		if not IsInGuild() then return false end
@@ -61,8 +57,6 @@ local function SenderStillEligible(sender, channel)
 		end
 		return false
 	end
-	-- PARTY or RAID: treat "currently grouped with" as good enough for
-	-- either, rather than splitting hairs over which exact channel.
 	return (UnitInParty(sender) and true) or (UnitInRaid(sender) and true) or false
 end
 
@@ -127,15 +121,9 @@ function Share.FulfillRequest(sender, shareID)
 	if lastFulfilledFrom[sender] and now - lastFulfilledFrom[sender] < RATE_LIMIT_SECONDS then
 		return
 	end
-	-- Set unconditionally, before we know whether this request is even
-	-- valid -- otherwise requests for nonexistent/ineligible IDs never trip
-	-- the cooldown and an attacker gets unlimited free replies.
 	lastFulfilledFrom[sender] = now
 
 	local share = pendingShares[shareID]
-	-- Same generic response whether the ID doesn't exist or the requester
-	-- just isn't currently eligible for it -- don't give an attacker an
-	-- oracle for which random IDs happen to be real.
 	if not share or not SenderStillEligible(sender, share.channel) then
 		ChatThrottleLib:SendAddonMessage("NORMAL", ADDON_PREFIX, "ERR:" .. shareID .. ":notfound", "WHISPER", sender)
 		return
