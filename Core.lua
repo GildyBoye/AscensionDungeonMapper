@@ -85,8 +85,63 @@ function DR.WithSavedMapState(fn)
 	return false, unpack(results)
 end
 
-function DR.GetRoutesForDungeon(dungeonKey)
+local decodedPresetsCache = {}
+
+local function GetPresetRoutesForDungeon(dungeonKey)
+	local cached = decodedPresetsCache[dungeonKey]
+	if cached then return cached end
+
+	local result = {}
+	local list = DR.PresetRoutes and DR.PresetRoutes[dungeonKey]
+	if list then
+		for _, preset in ipairs(list) do
+			if preset.exportString and preset.exportString ~= "" then
+				local ok, importedKey, _, routeData, err = DR.ShareExport.Import(preset.exportString)
+				if ok and importedKey == dungeonKey then
+					routeData.isPreset = true
+					result[preset.name] = routeData
+				elseif ok then
+					Print(("Preset '%s' for %s failed to load: exported for '%s' instead."):format(tostring(preset.name), dungeonKey, tostring(importedKey)))
+				else
+					Print(("Preset '%s' for %s failed to load: %s"):format(tostring(preset.name), dungeonKey, tostring(err)))
+				end
+			end
+		end
+	end
+	decodedPresetsCache[dungeonKey] = result
+	return result
+end
+DR.GetPresetRoutesForDungeon = GetPresetRoutesForDungeon
+
+function DR.GetOwnRoutesForDungeon(dungeonKey)
 	return DR.db.routes[dungeonKey] or {}
+end
+
+function DR.GetRoutesForDungeon(dungeonKey)
+	local routes = {}
+	for name, data in pairs(GetPresetRoutesForDungeon(dungeonKey)) do
+		routes[name] = data
+	end
+	for name, data in pairs(DR.GetOwnRoutesForDungeon(dungeonKey)) do
+		routes[name] = data
+	end
+	return routes
+end
+
+function DR.BestRouteNameForDungeon(dungeonKey)
+	local bestName, bestTime = nil, -1
+	for name, data in pairs(DR.GetOwnRoutesForDungeon(dungeonKey)) do
+		if (data.updated or 0) > bestTime then
+			bestName, bestTime = name, data.updated or 0
+		end
+	end
+	if bestName then return bestName end
+	for name, data in pairs(GetPresetRoutesForDungeon(dungeonKey)) do
+		if (data.updated or 0) > bestTime then
+			bestName, bestTime = name, data.updated or 0
+		end
+	end
+	return bestName
 end
 
 function DR.SaveRoute(dungeonKey, routeName, routeData)
@@ -152,6 +207,10 @@ SlashCmdList["ASCENSIONDUNGEONMAPPER"] = function(msg)
 		DR.db.knownMaps = {}
 		DR.db.bootstrapped = nil
 		Print("Cleared all cached map IDs. They'll be re-learned from the current DefaultMapIDs table and by walking into instances.")
+	elseif msg == "hud" then
+		if DR.RouteHud then
+			DR.RouteHud.ShowOrRefresh()
+		end
 	else
 		if DR.ToggleMainFrame then
 			DR.ToggleMainFrame()

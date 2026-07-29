@@ -56,6 +56,11 @@ local ERASE_TOLERANCE_PX = 6
 local canvas
 local mode
 local history = {}
+local editingLocked = false
+
+function Draw.SetEditingLocked(locked)
+	editingLocked = locked
+end
 
 local lineWidgets = {}
 local pointWidgets = {}
@@ -182,7 +187,7 @@ local function EraseNear(x, y)
 		local dx, dy = (x - p.x) * w, (y - p.y) * h
 		if math.sqrt(dx * dx + dy * dy) <= POINT_ERASE_RADIUS_PX then
 			if eraseSessionPoints then
-				eraseSessionPoints[#eraseSessionPoints + 1] = { x = p.x, y = p.y, title = p.title, text = p.text, icon = p.icon }
+				eraseSessionPoints[#eraseSessionPoints + 1] = { x = p.x, y = p.y, title = p.title, text = p.text, icon = p.icon, large = p.large }
 			end
 			Draw.RemovePoint(p)
 		end
@@ -194,6 +199,7 @@ for i = 1, 8 do
 	POINT_ICONS[#POINT_ICONS + 1] = {
 		texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_" .. i,
 		name = "Raid Icon " .. i,
+		category = "raid",
 	}
 end
 
@@ -204,12 +210,26 @@ local ROLES = {
 	{ name = "DPS", texCoord = { 20 / 64, 39 / 64, 22 / 64, 41 / 64 } },
 }
 for _, role in ipairs(ROLES) do
-	POINT_ICONS[#POINT_ICONS + 1] = { texture = ROLE_ICON_TEXTURE, texCoord = role.texCoord, name = role.name }
+	POINT_ICONS[#POINT_ICONS + 1] = { texture = ROLE_ICON_TEXTURE, texCoord = role.texCoord, name = role.name, category = "role" }
 end
 
 local COLOR_NAMES = { "Blue", "Red", "Green", "Yellow", "Purple", "Orange", "White" }
 for i, c in ipairs(LINE_COLORS) do
-	POINT_ICONS[#POINT_ICONS + 1] = { color = c, name = COLOR_NAMES[i] .. " Marker" }
+	POINT_ICONS[#POINT_ICONS + 1] = { color = c, name = COLOR_NAMES[i] .. " Marker", category = "color" }
+end
+
+for i = 1, 9 do
+	POINT_ICONS[#POINT_ICONS + 1] = { number = tostring(i), name = "Number " .. i, category = "number" }
+end
+
+POINT_ICONS[#POINT_ICONS + 1] = { textSquare = true, name = "Text Square", category = "textSquare" }
+
+local TEXT_SQUARE_ICON_INDEX
+for i, def in ipairs(POINT_ICONS) do
+	if def.textSquare then
+		TEXT_SQUARE_ICON_INDEX = i
+		break
+	end
 end
 
 Draw.POINT_ICONS = POINT_ICONS
@@ -220,7 +240,7 @@ local function PositionPointFrame(frame, x, y)
 	frame:SetPoint("CENTER", canvas, "TOPLEFT", x * w, -(y * h))
 end
 
-local function CreatePointWidget(x, y, title, text, icon)
+local function CreatePointWidget(x, y, title, text, icon, large)
 	local frame = CreateFrame("Button", nil, canvas)
 	frame:SetWidth(POINT_SIZE)
 	frame:SetHeight(POINT_SIZE)
@@ -238,11 +258,16 @@ local function CreatePointWidget(x, y, title, text, icon)
 	border:SetDrawLayer("OVERLAY", 0)
 	tex:SetDrawLayer("OVERLAY", 1)
 
-	local entry = { frame = frame, x = x, y = y, title = title or "", text = text or "", icon = icon }
+	local entry = { frame = frame, x = x, y = y, title = title or "", text = text or "", icon = icon, large = large or false }
 
 	function entry.SetIcon(newIcon)
 		entry.icon = newIcon
 		local def = newIcon and POINT_ICONS[newIcon]
+		if entry.numberText then entry.numberText:Hide() end
+		local sizeMult = entry.large and 2 or 1
+		local baseSize = POINT_SIZE * sizeMult
+		frame:SetWidth(baseSize)
+		frame:SetHeight(baseSize)
 		if not def then
 			tex:SetTexture(POINT_COLOR[1], POINT_COLOR[2], POINT_COLOR[3], POINT_COLOR[4])
 			tex:SetTexCoord(0, 1, 0, 1)
@@ -251,6 +276,23 @@ local function CreatePointWidget(x, y, title, text, icon)
 			tex:SetTexture(def.color[1], def.color[2], def.color[3], 1)
 			tex:SetTexCoord(0, 1, 0, 1)
 			border:Show()
+		elseif def.number then
+			tex:SetTexture(nil)
+			border:Hide()
+			if not entry.numberText then
+				entry.numberText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+				entry.numberText:SetPoint("CENTER", frame, "CENTER", 0, 0)
+			end
+			entry.numberText:SetFont("Fonts\\FRIZQT__.TTF", 18 * sizeMult, "THICKOUTLINE")
+			entry.numberText:SetTextColor(1, 0.82, 0)
+			entry.numberText:SetText(def.number)
+			entry.numberText:Show()
+		elseif def.textSquare then
+			tex:SetTexture(nil)
+			border:Hide()
+			if Draw.CreateTextNote then
+				Draw.CreateTextNote(entry)
+			end
 		else
 			tex:SetTexture(def.texture)
 			local tc = def.texCoord
@@ -265,6 +307,8 @@ local function CreatePointWidget(x, y, title, text, icon)
 	entry.SetIcon(icon)
 
 	frame:SetScript("OnEnter", function(self)
+		local curDef = entry.icon and POINT_ICONS[entry.icon]
+		if curDef and curDef.textSquare then return end
 		GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
 		GameTooltip:SetText(entry.title ~= "" and entry.title or "(untitled note)", 1, 1, 1)
 		if entry.text ~= "" then
@@ -277,9 +321,32 @@ local function CreatePointWidget(x, y, title, text, icon)
 	frame:SetScript("OnClick", function(self)
 		if mode == "erase" then
 			Draw.DeletePoint(entry)
-		elseif Draw.onPointClick then
+			return
+		end
+		local curDef = entry.icon and POINT_ICONS[entry.icon]
+		if curDef and curDef.textSquare then
+			return
+		end
+		if Draw.onPointClick then
 			Draw.onPointClick(entry)
 		end
+	end)
+
+	frame:SetMovable(true)
+	frame:RegisterForDrag("LeftButton")
+	frame:SetScript("OnDragStart", function(self)
+		if editingLocked or mode == "erase" then return end
+		local curDef = entry.icon and POINT_ICONS[entry.icon]
+		if curDef and curDef.textSquare then return end
+		self:StartMoving()
+	end)
+	frame:SetScript("OnDragStop", function(self)
+		self:StopMovingOrSizing()
+		local nx, ny = GetNormalizedCursorPos()
+		nx, ny = ClampNorm(nx), ClampNorm(ny)
+		entry.x, entry.y = nx, ny
+		PositionPointFrame(self, nx, ny)
+		Draw.NotifyChange()
 	end)
 
 	pointWidgets[#pointWidgets + 1] = entry
@@ -287,6 +354,9 @@ local function CreatePointWidget(x, y, title, text, icon)
 end
 
 Draw.onPointClick = nil
+Draw.CreateTextNote = nil
+Draw.RemoveTextNote = nil
+Draw.FocusTextNote = nil
 
 local changeListeners = {}
 function Draw.AddChangeListener(fn)
@@ -298,6 +368,21 @@ local function FireChange()
 	end
 end
 Draw.NotifyChange = FireChange
+
+local function PlaceMarker(icon)
+	local x, y = GetNormalizedCursorPos()
+	local entry = CreatePointWidget(ClampNorm(x), ClampNorm(y), "", "", icon)
+	history[#history + 1] = { kind = "point", entry = entry }
+	FireChange()
+	local def = icon and POINT_ICONS[icon]
+	if def and def.textSquare then
+		if Draw.FocusTextNote then
+			Draw.FocusTextNote(entry)
+		end
+	elseif Draw.onPointClick then
+		Draw.onPointClick(entry)
+	end
+end
 
 local function SetPolylineAnchor(x, y)
 	polylineAnchor = { x = x, y = y }
@@ -339,13 +424,9 @@ function Draw.Init(canvasFrame)
 			strokeHasSegment = false
 			lastX, lastY = x, y
 		elseif mode == "point" then
-			local x, y = GetNormalizedCursorPos()
-			local entry = CreatePointWidget(ClampNorm(x), ClampNorm(y), "", "", nil)
-			history[#history + 1] = { kind = "point", entry = entry }
-			FireChange()
-			if Draw.onPointClick then
-				Draw.onPointClick(entry)
-			end
+			PlaceMarker(1)
+		elseif mode == "textbox" then
+			PlaceMarker(TEXT_SQUARE_ICON_INDEX)
 		elseif mode == "polyline" then
 			local x, y = GetNormalizedCursorPos()
 			x, y = ClampNorm(x), ClampNorm(y)
@@ -425,9 +506,18 @@ function Draw.GetMode()
 	return mode
 end
 
+function Draw.SetPointPosition(entry, nx, ny)
+	entry.x, entry.y = ClampNorm(nx), ClampNorm(ny)
+	PositionPointFrame(entry.frame, entry.x, entry.y)
+	FireChange()
+end
+
 function Draw.RemovePoint(entry)
 	entry.frame:Hide()
 	entry.frame:SetParent(nil)
+	if Draw.RemoveTextNote then
+		Draw.RemoveTextNote(entry)
+	end
 	for i, p in ipairs(pointWidgets) do
 		if p == entry then table.remove(pointWidgets, i); break end
 	end
@@ -440,7 +530,7 @@ end
 
 function Draw.DeletePoint(entry)
 	history[#history + 1] = { kind = "erase", lines = {}, points = {
-		{ x = entry.x, y = entry.y, title = entry.title, text = entry.text, icon = entry.icon },
+		{ x = entry.x, y = entry.y, title = entry.title, text = entry.text, icon = entry.icon, large = entry.large },
 	} }
 	Draw.RemovePoint(entry)
 	FireChange()
@@ -473,7 +563,7 @@ function Draw.Undo()
 			CreateLineWidget(l.x1, l.y1, l.x2, l.y2, AllocateStrokeId(), l.color)
 		end
 		for _, p in ipairs(last.points) do
-			CreatePointWidget(p.x, p.y, p.title, p.text, p.icon)
+			CreatePointWidget(p.x, p.y, p.title, p.text, p.icon, p.large)
 		end
 	end
 	FireChange()
@@ -481,7 +571,13 @@ end
 
 function Draw.Clear()
 	for _, l in ipairs(lineWidgets) do l.tex:Hide() end
-	for _, p in ipairs(pointWidgets) do p.frame:Hide(); p.frame:SetParent(nil) end
+	for _, p in ipairs(pointWidgets) do
+		p.frame:Hide()
+		p.frame:SetParent(nil)
+		if Draw.RemoveTextNote then
+			Draw.RemoveTextNote(p)
+		end
+	end
 	lineWidgets = {}
 	pointWidgets = {}
 	history = {}
@@ -520,7 +616,7 @@ function Draw.GetRouteData()
 	for _, p in ipairs(pointWidgets) do
 		points[#points + 1] = {
 			x = QuantizeCoord(p.x), y = QuantizeCoord(p.y),
-			title = p.title, text = p.text, icon = p.icon,
+			title = p.title, text = p.text, icon = p.icon, large = p.large,
 		}
 	end
 	return lines, points
@@ -557,7 +653,7 @@ function Draw.LoadRouteData(lines, points)
 	end
 	for _, p in ipairs(points or {}) do
 		local x, y = Draw.NormalizePointData(p)
-		CreatePointWidget(x, y, p.title, p.text, p.icon)
+		CreatePointWidget(x, y, p.title, p.text, p.icon, p.large)
 	end
 end
 
@@ -569,12 +665,13 @@ function Draw.RenderStatic(targetFrame, width, height, lines, points, lineThickn
 
 	local pool = staticPools[targetFrame]
 	if not pool then
-		pool = { lineTexs = {}, pointTexs = {} }
+		pool = { lineTexs = {}, pointTexs = {}, numberTexts = {} }
 		staticPools[targetFrame] = pool
 	end
 
 	for _, t in ipairs(pool.lineTexs) do t:Hide() end
 	for _, t in ipairs(pool.pointTexs) do t:Hide() end
+	for _, t in ipairs(pool.numberTexts) do t:Hide() end
 
 	local lineCount = 0
 	for _, l in ipairs(lines or {}) do
@@ -611,12 +708,26 @@ function Draw.RenderStatic(targetFrame, width, height, lines, points, lineThickn
 			pool.pointTexs[pointCount] = tex
 		end
 		local def = p.icon and POINT_ICONS[p.icon]
+		local sizeMult = p.large and 2 or 1
+		local pSize = pointSize * sizeMult
+		local showBox = true
+		local boxW, boxH = pSize, pSize
+		local labelText, labelIsNumber
+
 		if not def then
 			tex:SetTexture(POINT_COLOR[1], POINT_COLOR[2], POINT_COLOR[3], POINT_COLOR[4])
 			tex:SetTexCoord(0, 1, 0, 1)
 		elseif def.color then
 			tex:SetTexture(def.color[1], def.color[2], def.color[3], 1)
 			tex:SetTexCoord(0, 1, 0, 1)
+		elseif def.number then
+			showBox = false
+			labelText = def.number
+			labelIsNumber = true
+		elseif def.textSquare then
+			tex:SetTexture(0, 0, 0, 0.6)
+			tex:SetTexCoord(0, 1, 0, 1)
+			labelText = (p.title and p.title ~= "") and p.title or "?"
 		else
 			tex:SetTexture(def.texture)
 			if def.texCoord then
@@ -625,10 +736,40 @@ function Draw.RenderStatic(targetFrame, width, height, lines, points, lineThickn
 				tex:SetTexCoord(0, 1, 0, 1)
 			end
 		end
-		tex:SetWidth(pointSize)
-		tex:SetHeight(pointSize)
-		tex:ClearAllPoints()
-		tex:SetPoint("CENTER", targetFrame, "TOPLEFT", x * width, -(y * height))
-		tex:Show()
+
+		local labelTex = pool.numberTexts[pointCount]
+		if labelText then
+			if not labelTex then
+				labelTex = targetFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+				pool.numberTexts[pointCount] = labelTex
+			end
+			if labelIsNumber then
+				labelTex:SetFont("Fonts\\FRIZQT__.TTF", math.max(12, math.floor(pSize * 1.4)), "THICKOUTLINE")
+				labelTex:SetTextColor(1, 0.82, 0)
+			else
+				labelTex:SetFont("Fonts\\FRIZQT__.TTF", math.max(10, math.floor(pointSize * 1.1)), "")
+				labelTex:SetTextColor(1, 1, 1)
+			end
+			labelTex:SetText(labelText)
+			labelTex:ClearAllPoints()
+			labelTex:SetPoint("CENTER", targetFrame, "TOPLEFT", x * width, -(y * height))
+			labelTex:Show()
+			if def.textSquare then
+				boxW = math.max(pointSize, labelTex:GetStringWidth() + 6)
+				boxH = math.max(pointSize, labelTex:GetStringHeight() + 4)
+			end
+		elseif labelTex then
+			labelTex:Hide()
+		end
+
+		if showBox then
+			tex:SetWidth(boxW)
+			tex:SetHeight(boxH)
+			tex:ClearAllPoints()
+			tex:SetPoint("CENTER", targetFrame, "TOPLEFT", x * width, -(y * height))
+			tex:Show()
+		else
+			tex:Hide()
+		end
 	end
 end

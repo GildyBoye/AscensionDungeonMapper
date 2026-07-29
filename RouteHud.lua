@@ -1,5 +1,6 @@
 AscensionDungeonMapper = AscensionDungeonMapper or {}
 local DR = AscensionDungeonMapper
+DR.RouteHud = {}
 
 local DEFAULT_W, DEFAULT_H = 420, 276
 local ASPECT_RATIO = DEFAULT_W / DEFAULT_H
@@ -373,14 +374,7 @@ local function BuildHudFrame()
 end
 
 local function BestRouteName(dungeonKey)
-	local routes = DR.GetRoutesForDungeon(dungeonKey)
-	local bestName, bestTime = nil, -1
-	for name, data in pairs(routes) do
-		if (data.updated or 0) > bestTime then
-			bestName, bestTime = name, data.updated or 0
-		end
-	end
-	return bestName
+	return DR.BestRouteNameForDungeon(dungeonKey)
 end
 
 local function ShowRouteHud(dungeonKey)
@@ -403,6 +397,40 @@ local function ShowRouteHud(dungeonKey)
 	hudFrame:Show()
 end
 
+local function ResolveCurrentDungeonKey()
+	local inInstance, instanceType = IsInInstance()
+	if not inInstance or (instanceType ~= "party" and instanceType ~= "raid") then
+		return nil
+	end
+	local name = GetInstanceInfo()
+	return DR.KeyByNormalizedName[DR.NormalizeName(name)]
+end
+
+function DR.RouteHud.ShowOrRefresh()
+	local key = ResolveCurrentDungeonKey()
+	if not key then
+		DR.Print("Not currently in a dungeon this addon recognizes.")
+		return
+	end
+	local routeName = BestRouteName(key)
+	if not routeName then
+		DR.Print("No saved route for this dungeon yet.")
+		return
+	end
+	ShowRouteHud(key)
+end
+
+function DR.RouteHud.NotifyRouteChanged(dungeonKey)
+	if not hudFrame or not hudFrame:IsShown() or hudDungeonKey ~= dungeonKey then return end
+	local routeName = BestRouteName(dungeonKey)
+	if routeName then
+		ShowRouteHud(dungeonKey)
+	else
+		SetMinimapOverlay(false)
+		hudFrame:Hide()
+	end
+end
+
 DR.DrawEngine.AddChangeListener(function()
 	if not hudFrame or not hudFrame:IsShown() or not hudDungeonKey then return end
 	if not DR.UI.GetOpenRoute then return end
@@ -415,15 +443,6 @@ DR.DrawEngine.AddChangeListener(function()
 		RedrawHudRoute()
 	end
 end)
-
-local function ResolveCurrentDungeonKey()
-	local inInstance, instanceType = IsInInstance()
-	if not inInstance or (instanceType ~= "party" and instanceType ~= "raid") then
-		return nil
-	end
-	local name = GetInstanceInfo()
-	return DR.KeyByNormalizedName[DR.NormalizeName(name)]
-end
 
 local function CheckAndShowHud()
 	local key = ResolveCurrentDungeonKey()
