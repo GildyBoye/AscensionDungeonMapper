@@ -778,14 +778,18 @@ local textNoteFrames = setmetatable({}, { __mode = "k" })
 local TEXT_NOTE_W, TEXT_NOTE_H = 160, 130
 local TEXT_NOTE_MAX_LETTERS = 255
 
-local function PlaceTextNote(entry, note, x, y)
-	local canvas = entry.frame:GetParent()
+local function ClampNotePos(canvas, x, y)
 	local w, h = canvas:GetWidth(), canvas:GetHeight()
 	x = math.min(math.max(x, 0), math.max(w - TEXT_NOTE_W, 0))
 	y = math.max(math.min(y, 0), -math.max(h - TEXT_NOTE_H, 0))
+	return x, y
+end
+
+local function DisplayTextNote(note, canvas, x, y)
+	local cx, cy = ClampNotePos(canvas, x, y)
 	note:ClearAllPoints()
-	note:SetPoint("TOPLEFT", canvas, "TOPLEFT", x, y)
-	DR.DrawEngine.SetPointPosition(entry, x / w, -y / h)
+	note:SetPoint("TOPLEFT", canvas, "TOPLEFT", cx, cy)
+	return cx, cy
 end
 
 local function CreateTextNoteFrame(entry)
@@ -803,14 +807,19 @@ local function CreateTextNoteFrame(entry)
 	note:EnableMouse(true)
 	note:SetMovable(true)
 	note:RegisterForDrag("LeftButton")
-	note:SetScript("OnDragStart", function(self) self:StartMoving() end)
+	note:SetScript("OnDragStart", function(self)
+		if currentRouteIsPreset then return end
+		self:StartMoving()
+	end)
 	note:SetScript("OnDragStop", function(self)
 		self:StopMovingOrSizing()
+		if currentRouteIsPreset then return end
 		local canvas = entry.frame:GetParent()
-		PlaceTextNote(entry, self, self:GetLeft() - canvas:GetLeft(), self:GetTop() - canvas:GetTop())
+		local cx, cy = DisplayTextNote(self, canvas, self:GetLeft() - canvas:GetLeft(), self:GetTop() - canvas:GetTop())
+		DR.DrawEngine.SetPointPosition(entry, cx / canvas:GetWidth(), -cy / canvas:GetHeight())
 	end)
 	local initCanvas = entry.frame:GetParent()
-	PlaceTextNote(entry, note, entry.x * initCanvas:GetWidth(), -entry.y * initCanvas:GetHeight())
+	DisplayTextNote(note, initCanvas, entry.x * initCanvas:GetWidth(), -entry.y * initCanvas:GetHeight())
 
 	local titleFS = note:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 	titleFS:SetPoint("TOP", note, "TOP", 0, -8)
@@ -819,6 +828,10 @@ local function CreateTextNoteFrame(entry)
 	local closeBtn = CreateFrame("Button", nil, note, "UIPanelCloseButton")
 	closeBtn:SetPoint("TOPRIGHT", note, "TOPRIGHT", -2, -2)
 	closeBtn:SetScript("OnClick", function()
+		if currentRouteIsPreset then
+			DR.Print("Can't delete markers on a default route. Edit it and Save to create your own copy.")
+			return
+		end
 		DR.DrawEngine.DeletePoint(entry)
 	end)
 
@@ -1238,18 +1251,94 @@ end
 
 local PREVIEW_W, PREVIEW_H = 260, 170
 
-local function RenderSharePreview(previewFrame, routeData)
+local function RenderSharePreview(previewFrame, dungeonKey, routeData)
 	local levels = DR.NormalizeRouteLevels(routeData)
-	local lvl = levels[routeData.level or 0]
+	local level = routeData.level or 0
+	local lvl = levels[level]
 	if not lvl then
-		local _, anyLevel = next(levels)
-		lvl = anyLevel or { lines = {}, points = {} }
+		local anyLevel, anyData = next(levels)
+		level = anyLevel or 0
+		lvl = anyData or { lines = {}, points = {} }
+	end
+	local info = DR.DungeonByKey[dungeonKey]
+	if info then
+		DR.MapTexture.Build(previewFrame, info.parentKey or dungeonKey, level)
 	end
 	DR.DrawEngine.RenderStatic(previewFrame, PREVIEW_W, PREVIEW_H, lvl.lines, lvl.points, 1.5, 8)
 end
 
+local replacePickerDialog
+local pendingReplaceShare
+
+local function BuildReplacePickerDialog()
+	local f = CreateBorderedFrame("AscensionDungeonMapperReplacePicker", UIParent, 260, 280, "Replace a Route")
+	f:SetPoint("CENTER")
+	f:SetFrameStrata("DIALOG")
+	f:Hide()
+
+	local info = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	info:SetPoint("TOP", f, "TOP", 0, -34)
+	info:SetWidth(230)
+	info:SetJustifyH("CENTER")
+	info:SetText("You already have " .. MAX_ROUTES_PER_DUNGEON .. " routes for this dungeon. Pick one to replace:")
+
+	f.slots = {}
+	for i = 1, MAX_ROUTES_PER_DUNGEON do
+		local btn = CreateActionButton(f, "", 220)
+		btn:SetPoint("TOP", f, "TOP", 0, -72 - (i - 1) * 24)
+		btn:SetScript("OnClick", function()
+			if pendingReplaceShare and btn.routeName then
+				local p = pendingReplaceShare
+				DR.DeleteRoute(p.dungeonKey, btn.routeName)
+				if DR.RouteHud then DR.RouteHud.NotifyRouteChanged(p.dungeonKey) end
+				DR.UI.ImportParsedRoute(p.dungeonKey, p.routeName, p.routeData, "(shared by " .. p.sender .. ")")
+				pendingReplaceShare = nil
+			end
+			f:Hide()
+		end)
+		f.slots[i] = btn
+	end
+
+	local cancelBtn = CreateActionButton(f, "Cancel", 90)
+	cancelBtn:SetPoint("BOTTOM", f, "BOTTOM", 0, 14)
+	cancelBtn:SetScript("OnClick", function()
+		pendingReplaceShare = nil
+		f:Hide()
+	end)
+
+	return f
+end
+
+local function OpenReplacePicker(p)
+	pendingReplaceShare = p
+	if not replacePickerDialog then
+		replacePickerDialog = BuildReplacePickerDialog()
+	end
+	local names = {}
+	for name in pairs(DR.GetOwnRoutesForDungeon(p.dungeonKey)) do names[#names + 1] = name end
+	table.sort(names)
+	for i, btn in ipairs(replacePickerDialog.slots) do
+		local name = names[i]
+		if name then
+			btn:SetText(name)
+			btn.routeName = name
+			btn:Show()
+		else
+			btn.routeName = nil
+			btn:Hide()
+		end
+	end
+	replacePickerDialog:Show()
+end
+
 local sharePreviewDialog
 local pendingSharedRoute
+
+local function CountOwnRoutes(dungeonKey)
+	local count = 0
+	for _ in pairs(DR.GetOwnRoutesForDungeon(dungeonKey)) do count = count + 1 end
+	return count
+end
 
 local function BuildSharePreviewDialog()
 	local f = CreateBorderedFrame("AscensionDungeonMapperSharePreview", UIParent, 300, 280, "Shared Route")
@@ -1279,13 +1368,23 @@ local function BuildSharePreviewDialog()
 	local acceptBtn = CreateActionButton(f, "Import", 90)
 	acceptBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 14, 14)
 	acceptBtn:SetScript("OnClick", function()
-		if pendingSharedRoute then
-			DR.UI.ImportParsedRoute(pendingSharedRoute.dungeonKey, pendingSharedRoute.routeName, pendingSharedRoute.routeData,
-				"(shared by " .. pendingSharedRoute.sender .. ")")
+		if not pendingSharedRoute then
+			f:Hide()
+			return
 		end
+		local p = pendingSharedRoute
+		local ownRoutes = DR.GetOwnRoutesForDungeon(p.dungeonKey)
+		if CountOwnRoutes(p.dungeonKey) >= MAX_ROUTES_PER_DUNGEON and not ownRoutes[p.routeName] then
+			pendingSharedRoute = nil
+			f:Hide()
+			OpenReplacePicker(p)
+			return
+		end
+		DR.UI.ImportParsedRoute(p.dungeonKey, p.routeName, p.routeData, "(shared by " .. p.sender .. ")")
 		pendingSharedRoute = nil
 		f:Hide()
 	end)
+	f.acceptBtn = acceptBtn
 
 	local declineBtn = CreateActionButton(f, "Decline", 90)
 	declineBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 14)
@@ -1293,6 +1392,7 @@ local function BuildSharePreviewDialog()
 		pendingSharedRoute = nil
 		f:Hide()
 	end)
+	f.declineBtn = declineBtn
 
 	return f
 end
@@ -1304,7 +1404,17 @@ DR.ShareChat.onRouteReceived = function(sender, dungeonKey, routeName, routeData
 	pendingSharedRoute = { sender = sender, dungeonKey = dungeonKey, routeName = routeName, routeData = routeData }
 	local dungeonInfo = DR.DungeonByKey[dungeonKey]
 	sharePreviewDialog.info:SetText(("%s shared \"%s\" for %s"):format(sender, routeName, dungeonInfo and dungeonInfo.name or dungeonKey))
-	RenderSharePreview(sharePreviewDialog.previewFrame, routeData)
+	RenderSharePreview(sharePreviewDialog.previewFrame, dungeonKey, routeData)
+
+	local ownRoutes = DR.GetOwnRoutesForDungeon(dungeonKey)
+	if CountOwnRoutes(dungeonKey) >= MAX_ROUTES_PER_DUNGEON and not ownRoutes[routeName] then
+		sharePreviewDialog.acceptBtn:SetText("Save and Replace")
+		sharePreviewDialog.declineBtn:SetText("Ignore")
+	else
+		sharePreviewDialog.acceptBtn:SetText("Import")
+		sharePreviewDialog.declineBtn:SetText("Decline")
+	end
+
 	sharePreviewDialog:Show()
 end
 
