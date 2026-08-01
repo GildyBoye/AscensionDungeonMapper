@@ -34,6 +34,36 @@ local presetBoxSlot
 local undoBtn, clearBtn, renameBtn, deleteBtn
 local RefreshRouteBox
 
+local TOOLTIP_DELAY = 0.5
+
+local function SetDelayedTooltip(widget, showFn)
+	widget:SetScript("OnEnter", function(self)
+		self.drTooltipElapsed = 0
+		self:SetScript("OnUpdate", function(self, elapsed)
+			self.drTooltipElapsed = self.drTooltipElapsed + elapsed
+			if self.drTooltipElapsed >= TOOLTIP_DELAY then
+				self:SetScript("OnUpdate", nil)
+				showFn(self)
+			end
+		end)
+	end)
+	widget:SetScript("OnLeave", function(self)
+		self:SetScript("OnUpdate", nil)
+		GameTooltip:Hide()
+	end)
+end
+
+local function AddTooltip(widget, title, subtext)
+	SetDelayedTooltip(widget, function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:SetText(title, 1, 1, 1)
+		if subtext then
+			GameTooltip:AddLine(subtext, 0.9, 0.9, 0.9, true)
+		end
+		GameTooltip:Show()
+	end)
+end
+
 local function CreateActionButton(parent, text, width)
 	local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
 	btn:SetWidth(width or 90)
@@ -86,6 +116,7 @@ local function CreateBorderedFrame(name, parent, width, height, title)
 	local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
 	closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
 	closeBtn:SetScript("OnClick", function() f:Hide() end)
+	AddTooltip(closeBtn, "Close", nil)
 
 	return f
 end
@@ -489,11 +520,13 @@ function RefreshRouteBox()
 			if name == currentRouteName and not currentRouteIsPreset then slot.selectedBorder:Show() else slot.selectedBorder:Hide() end
 			slot:SetScript("OnClick", function() DR.UI.LoadRoute(name) end)
 			slot:EnableMouse(true)
+			AddTooltip(slot, name, "Click to load this saved route.")
 		else
 			slot.text:SetText("|cff555555(empty)|r")
 			slot.selectedBorder:Hide()
 			slot:SetScript("OnClick", StartNewRoute)
 			slot:EnableMouse(true)
+			AddTooltip(slot, "Empty Slot", "Click to start a new route in this slot.")
 		end
 	end
 
@@ -513,6 +546,7 @@ function RefreshRouteBox()
 		presetBoxSlot:SetScript("OnClick", function() DR.UI.LoadRoute(name, true) end)
 		presetBoxSlot:EnableMouse(true)
 		presetBoxSlot:Show()
+		AddTooltip(presetBoxSlot, name .. " (Default)", "A built-in route for this dungeon. Read-only -- edit and Save to create your own copy.")
 	else
 		presetBoxSlot:Hide()
 	end
@@ -567,12 +601,7 @@ local function MakeIconButton(iconRow, col, row, iconValue, def)
 	btn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
 
 	btn:SetScript("OnClick", function() iconRow:SetSelected(iconValue) end)
-	btn:SetScript("OnEnter", function(self)
-		GameTooltip:SetOwner(self, "ANCHOR_TOP")
-		GameTooltip:SetText(def.name, 1, 1, 1)
-		GameTooltip:Show()
-	end)
-	btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	AddTooltip(btn, def.name, nil)
 
 	iconRow.buttons[#iconRow.buttons + 1] = btn
 	return btn
@@ -671,6 +700,7 @@ local function BuildPointEditor()
 	smallText:SetText("S")
 	smallSizeBtn.selectedBorder = CreateSelectionBorder(smallSizeBtn, 2)
 	smallSizeBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+	AddTooltip(smallSizeBtn, "Small", "Default marker size.")
 
 	local largeSizeBtn = CreateFrame("Button", nil, f)
 	largeSizeBtn:SetWidth(SIZE_BTN_SIZE)
@@ -684,6 +714,7 @@ local function BuildPointEditor()
 	largeText:SetText("L")
 	largeSizeBtn.selectedBorder = CreateSelectionBorder(largeSizeBtn, 2)
 	largeSizeBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+	AddTooltip(largeSizeBtn, "Large", "Doubles the marker's size.")
 
 	function f:SetSizeLarge(isLarge)
 		f.sizeLarge = isLarge
@@ -739,6 +770,7 @@ local function BuildPointEditor()
 		end
 		f:Hide()
 	end)
+	AddTooltip(saveBtn, "Save", "Save the title, description, icon, and size for this marker.")
 
 	local deleteBtn = CreateActionButton(f, "Delete Marker", 100)
 	deleteBtn:SetPoint("LEFT", saveBtn, "RIGHT", 8, 0)
@@ -748,10 +780,12 @@ local function BuildPointEditor()
 		end
 		f:Hide()
 	end)
+	AddTooltip(deleteBtn, "Delete Marker", "Remove this marker from the map.")
 
 	local cancelBtn = CreateActionButton(f, "Cancel", 80)
 	cancelBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 14)
 	cancelBtn:SetScript("OnClick", function() f:Hide() end)
+	AddTooltip(cancelBtn, "Cancel", "Close without saving changes.")
 
 	return f
 end
@@ -834,6 +868,7 @@ local function CreateTextNoteFrame(entry)
 		end
 		DR.DrawEngine.DeletePoint(entry)
 	end)
+	AddTooltip(closeBtn, "Delete", "Delete this text marker.")
 
 	local charCountFS = note:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	charCountFS:SetPoint("BOTTOMRIGHT", note, "BOTTOMRIGHT", -8, 6)
@@ -1047,6 +1082,7 @@ local function OpenExportDialog(title, str)
 		local closeBtn = CreateActionButton(exportDialog, "Close", 80)
 		closeBtn:SetPoint("BOTTOMRIGHT", exportDialog, "BOTTOMRIGHT", -14, 14)
 		closeBtn:SetScript("OnClick", function() exportDialog:Hide() end)
+		AddTooltip(closeBtn, "Close", nil)
 	end
 	exportDialog.titleText:SetText(title)
 	exportDialog.editBox:SetText(str)
@@ -1067,10 +1103,12 @@ local function OpenImportDialog()
 			DR.UI.HandleImport(importDialog.editBox:GetText())
 			importDialog:Hide()
 		end)
+		AddTooltip(importBtn, "Import", "Add the pasted route to this dungeon's route list.")
 
 		local cancelBtn = CreateActionButton(importDialog, "Cancel", 80)
 		cancelBtn:SetPoint("BOTTOMRIGHT", importDialog, "BOTTOMRIGHT", -14, 14)
 		cancelBtn:SetScript("OnClick", function() importDialog:Hide() end)
+		AddTooltip(cancelBtn, "Cancel", nil)
 	end
 	importDialog.editBox:SetText("")
 	importDialog:Show()
@@ -1086,6 +1124,7 @@ local function BuildLinkDialog(name, title, hint, url)
 	local closeBtn = CreateActionButton(f, "Close", 80)
 	closeBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 14)
 	closeBtn:SetScript("OnClick", function() f:Hide() end)
+	AddTooltip(closeBtn, "Close", nil)
 
 	return f
 end
@@ -1177,18 +1216,22 @@ local function BuildShareChannelDialog()
 	local raidBtn = CreateActionButton(f, "Raid", 70)
 	raidBtn:SetPoint("TOP", info, "BOTTOM", 0, -16)
 	raidBtn:SetScript("OnClick", function() ShareCurrentRoute("RAID") f:Hide() end)
+	AddTooltip(raidBtn, "Raid", "Share this route to raid chat.")
 
 	local partyBtn = CreateActionButton(f, "Party", 70)
 	partyBtn:SetPoint("RIGHT", raidBtn, "LEFT", -6, 0)
 	partyBtn:SetScript("OnClick", function() ShareCurrentRoute("PARTY") f:Hide() end)
+	AddTooltip(partyBtn, "Party", "Share this route to party chat.")
 
 	local guildBtn = CreateActionButton(f, "Guild", 70)
 	guildBtn:SetPoint("LEFT", raidBtn, "RIGHT", 6, 0)
 	guildBtn:SetScript("OnClick", function() ShareCurrentRoute("GUILD") f:Hide() end)
+	AddTooltip(guildBtn, "Guild", "Share this route to guild chat.")
 
 	local cancelBtn = CreateActionButton(f, "Cancel", 80)
 	cancelBtn:SetPoint("BOTTOM", f, "BOTTOM", 0, 14)
 	cancelBtn:SetScript("OnClick", function() f:Hide() end)
+	AddTooltip(cancelBtn, "Cancel", nil)
 
 	return f
 end
@@ -1205,6 +1248,8 @@ local function OpenShareChannelDialog()
 end
 
 local COLOR_SWATCH_SIZE = 18
+
+local COLOR_SWATCH_NAMES = { "Blue", "Red", "Green", "Yellow", "Purple", "Orange", "White" }
 
 local function BuildColorPicker(parentCanvas)
 	local colors = DR.DrawEngine.LINE_COLORS
@@ -1241,6 +1286,8 @@ local function BuildColorPicker(parentCanvas)
 				if b == btn then b.selectedBorder:Show() else b.selectedBorder:Hide() end
 			end
 		end)
+
+		AddTooltip(btn, COLOR_SWATCH_NAMES[i] or "Line Color", "Draw lines in this color.")
 
 		picker.buttons[#picker.buttons + 1] = btn
 	end
@@ -1296,11 +1343,13 @@ local function BuildReplacePickerDialog()
 			end
 			f:Hide()
 		end)
+		AddTooltip(btn, "Replace This Route", "Delete this route and save the shared one in its place.")
 		f.slots[i] = btn
 	end
 
 	local cancelBtn = CreateActionButton(f, "Cancel", 90)
 	cancelBtn:SetPoint("BOTTOM", f, "BOTTOM", 0, 14)
+	AddTooltip(cancelBtn, "Cancel", nil)
 	cancelBtn:SetScript("OnClick", function()
 		pendingReplaceShare = nil
 		f:Hide()
@@ -1409,10 +1458,14 @@ DR.ShareChat.onRouteReceived = function(sender, dungeonKey, routeName, routeData
 	local ownRoutes = DR.GetOwnRoutesForDungeon(dungeonKey)
 	if CountOwnRoutes(dungeonKey) >= MAX_ROUTES_PER_DUNGEON and not ownRoutes[routeName] then
 		sharePreviewDialog.acceptBtn:SetText("Save and Replace")
+		AddTooltip(sharePreviewDialog.acceptBtn, "Save and Replace", "Your routes are full for this dungeon -- pick one to replace with this shared route.")
 		sharePreviewDialog.declineBtn:SetText("Ignore")
+		AddTooltip(sharePreviewDialog.declineBtn, "Ignore", "Don't save this shared route.")
 	else
 		sharePreviewDialog.acceptBtn:SetText("Import")
+		AddTooltip(sharePreviewDialog.acceptBtn, "Import", "Save this shared route to your own route list.")
 		sharePreviewDialog.declineBtn:SetText("Decline")
+		AddTooltip(sharePreviewDialog.declineBtn, "Decline", "Don't save this shared route.")
 	end
 
 	sharePreviewDialog:Show()
@@ -1440,6 +1493,7 @@ local function BuildShareToastDialog()
 		end
 		f:Hide()
 	end)
+	AddTooltip(getBtn, "Get", "Request this shared route from its sender.")
 
 	local ignoreBtn = CreateActionButton(f, "Ignore", 90)
 	ignoreBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 14)
@@ -1447,6 +1501,7 @@ local function BuildShareToastDialog()
 		f.pending = nil
 		f:Hide()
 	end)
+	AddTooltip(ignoreBtn, "Ignore", "Don't request this shared route.")
 
 	return f
 end
@@ -1482,6 +1537,7 @@ local function BuildMainFrame()
 			btn:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -30)
 		end
 		btn:SetScript("OnClick", function() SetEra(era) end)
+		AddTooltip(btn, eraLabels[era], "Show " .. eraLabels[era] .. " dungeons and raids in the list.")
 		prevBtn = btn
 	end
 
@@ -1508,6 +1564,7 @@ local function BuildMainFrame()
 	levelNext = CreateActionButton(f, ">", 24)
 	levelNext:SetPoint("TOPRIGHT", f, "TOPRIGHT", -14, -34)
 	levelNext:SetScript("OnClick", function() ChangeLevel(1) end)
+	AddTooltip(levelNext, "Next Level", "Switch to the next level/wing of this instance.")
 
 	levelText = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 	levelText:SetPoint("RIGHT", levelNext, "LEFT", -2, 0)
@@ -1517,6 +1574,7 @@ local function BuildMainFrame()
 	levelPrev = CreateActionButton(f, "<", 24)
 	levelPrev:SetPoint("RIGHT", levelText, "LEFT", -2, 0)
 	levelPrev:SetScript("OnClick", function() ChangeLevel(-1) end)
+	AddTooltip(levelPrev, "Previous Level", "Switch to the previous level/wing of this instance.")
 
 	canvas = CreateFrame("Frame", "AscensionDungeonMapperCanvas", f)
 	canvas:SetWidth(CANVAS_W)
@@ -1575,18 +1633,25 @@ local function BuildMainFrame()
 	end
 
 	local lineBtn = ModeButton("Draw", "line", nil, toolRowX, 0)
+	AddTooltip(lineBtn, "Draw", "Freehand draw tool -- click and drag to draw a line.")
 	local polylineBtn = ModeButton("Line", "polyline", lineBtn)
+	AddTooltip(polylineBtn, "Line", "Click to place a point, click again to connect it with a straight segment. Right-click to reset.")
 	local pointBtn = ModeButton("Marker", "point", polylineBtn)
+	AddTooltip(pointBtn, "Marker", "Place a marker with an icon, title, description, and size.")
 	local textBtn = ModeButton("Text", "textbox", pointBtn)
+	AddTooltip(textBtn, "Text", "Place a text note directly on the map.")
 	local eraseBtn = ModeButton("Erase", "erase", nil, eraseRowX, eraseRowY)
+	AddTooltip(eraseBtn, "Erase", "Click or drag over lines and markers to remove them.")
 
 	undoBtn = CreateActionButton(toolbar, "Undo", 70)
 	undoBtn:SetPoint("TOPLEFT", toolbar, "TOPLEFT", undoClearX, undoClearY)
 	undoBtn:SetScript("OnClick", function() DR.DrawEngine.Undo() end)
+	AddTooltip(undoBtn, "Undo", "Undo the last drawing action.")
 
 	clearBtn = CreateActionButton(toolbar, "Clear", 70)
 	clearBtn:SetPoint("LEFT", undoBtn, "RIGHT", TOOL_GAP, 0)
 	clearBtn:SetScript("OnClick", function() StaticPopup_Show("ASCENSIONDUNGEONMAPPER_CONFIRM_CLEAR") end)
+	AddTooltip(clearBtn, "Clear", "Erase everything on the map. Can't be undone.")
 
 	local ROUTE_ROW_HEIGHT = 16
 	local ROUTE_BOX_WIDTH = 180
@@ -1610,6 +1675,7 @@ local function BuildMainFrame()
 		end
 		StaticPopup_Show("ASCENSIONDUNGEONMAPPER_RENAME_ROUTE")
 	end)
+	AddTooltip(renameBtn, "Rename", "Rename the currently loaded route.")
 
 	deleteBtn = CreateActionButton(toolbar2, "Delete", 87)
 	deleteBtn:SetPoint("LEFT", renameBtn, "RIGHT", 6, 0)
@@ -1624,6 +1690,7 @@ local function BuildMainFrame()
 		end
 		StaticPopup_Show("ASCENSIONDUNGEONMAPPER_CONFIRM_DELETE", currentRouteName)
 	end)
+	AddTooltip(deleteBtn, "Delete", "Delete the currently loaded route. Can't be undone.")
 
 	local routeBox = CreateFrame("Frame", nil, toolbar2)
 	routeBox:SetPoint("TOPLEFT", toolbar2, "TOPLEFT", 0, -ROUTE_BOX_HEADER_H)
@@ -1672,10 +1739,12 @@ local function BuildMainFrame()
 	local newBtn = CreateActionButton(toolbar2, "New Route", 100)
 	newBtn:SetPoint("TOPLEFT", toolbar2, "TOPLEFT", row1X, buttonBlockTop)
 	newBtn:SetScript("OnClick", StartNewRoute)
+	AddTooltip(newBtn, "New Route", "Clear the map and start a fresh, unsaved route.")
 
 	local saveBtn = CreateActionButton(toolbar2, "Save", 70)
 	saveBtn:SetPoint("LEFT", newBtn, "RIGHT", 6, 0)
 	saveBtn:SetScript("OnClick", function() SaveCurrentRoute() end)
+	AddTooltip(saveBtn, "Save", "Save the current route. If it's a default route, this saves your own editable copy.")
 
 	local autoSaveCheck = CreateFrame("CheckButton", "AscensionDungeonMapperAutoSaveCheck", toolbar2, "UICheckButtonTemplate")
 	autoSaveCheck:SetWidth(22)
@@ -1686,18 +1755,33 @@ local function BuildMainFrame()
 	autoSaveCheck:SetScript("OnClick", function(self)
 		DR.db.autoSave = self:GetChecked() and true or false
 	end)
+	AddTooltip(autoSaveCheck, "Auto-Save", "Automatically save the loaded route every time you make a change.")
+
+	local autoHudCheck = CreateFrame("CheckButton", "AscensionDungeonMapperAutoHudCheck", toolbar2, "UICheckButtonTemplate")
+	autoHudCheck:SetWidth(22)
+	autoHudCheck:SetHeight(22)
+	autoHudCheck:SetPoint("LEFT", _G[autoSaveCheck:GetName() .. "Text"], "RIGHT", 10, 0)
+	_G[autoHudCheck:GetName() .. "Text"]:SetText("Auto HUD")
+	autoHudCheck:SetChecked(DR.db.autoHud ~= false)
+	autoHudCheck:SetScript("OnClick", function(self)
+		DR.db.autoHud = self:GetChecked() and true or false
+	end)
+	AddTooltip(autoHudCheck, "Auto HUD", "Automatically pop up the route HUD when you enter a dungeon this addon recognizes.")
 
 	local exportBtn = CreateActionButton(toolbar2, "Export", 80)
 	exportBtn:SetPoint("TOPLEFT", toolbar2, "TOPLEFT", row2X, buttonBlockTop - 22 - 6)
 	exportBtn:SetScript("OnClick", ExportCurrent)
+	AddTooltip(exportBtn, "Export", "Get a paste-able text string for the current route, to share outside the game.")
 
 	local importBtn = CreateActionButton(toolbar2, "Import", 80)
 	importBtn:SetPoint("LEFT", exportBtn, "RIGHT", 6, 0)
 	importBtn:SetScript("OnClick", function() DR.UI.OpenImportDialog() end)
+	AddTooltip(importBtn, "Import", "Paste a route's share string to add it to this dungeon.")
 
 	local shareBtn = CreateActionButton(toolbar2, "Share", 90)
 	shareBtn:SetPoint("TOPRIGHT", toolbar2, "TOPRIGHT", -10, buttonBlockTop - 22 - 6)
 	shareBtn:SetScript("OnClick", OpenShareChannelDialog)
+	AddTooltip(shareBtn, "Share", "Share the current route directly to party, raid, or guild chat.")
 
 	local creditText = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	creditText:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -30, 14)
@@ -1712,13 +1796,12 @@ local function BuildMainFrame()
 	githubTex:SetTexture("Interface\\Icons\\INV_Misc_Note_01")
 	githubBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
 	githubBtn:SetScript("OnClick", OpenGithubDialog)
-	githubBtn:SetScript("OnEnter", function(self)
+	SetDelayedTooltip(githubBtn, function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
 		GameTooltip:SetText("View on GitHub", 1, 1, 1)
 		GameTooltip:AddLine(GITHUB_URL, 0.6, 0.8, 1, true)
 		GameTooltip:Show()
 	end)
-	githubBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
 	local discordBtn = CreateFrame("Button", nil, f)
 	discordBtn:SetWidth(16)
@@ -1729,13 +1812,12 @@ local function BuildMainFrame()
 	discordTex:SetTexture("Interface\\Common\\VoiceChat-Speaker")
 	discordBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
 	discordBtn:SetScript("OnClick", OpenDiscordDialog)
-	discordBtn:SetScript("OnEnter", function(self)
+	SetDelayedTooltip(discordBtn, function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
 		GameTooltip:SetText("Join the Discord", 1, 1, 1)
 		GameTooltip:AddLine(DISCORD_URL, 0.6, 0.8, 1, true)
 		GameTooltip:Show()
 	end)
-	discordBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
 	SetModeButtonHighlight(nil)
 	RefreshRouteBox()

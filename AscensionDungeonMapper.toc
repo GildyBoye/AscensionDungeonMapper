@@ -2,7 +2,7 @@
 ## Title: Ascension Dungeon Mapper
 ## Notes: Pick a dungeon or raid map, draw routes and add point notes, then save and share them via export string or in-game party/raid/guild share. - Made by Gild.
 ## Author: Gild
-## Version: 1.2.1
+## Version: 1.3.0
 ## SavedVariables: AscensionDungeonMapperDB
 
 Libs\LibStub\LibStub.lua

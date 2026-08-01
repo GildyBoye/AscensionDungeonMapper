@@ -21,6 +21,25 @@ local minimapBlips = {}
 local minimapLineDotTexs = {}
 local minimapTicker
 
+local TOOLTIP_DELAY = 0.5
+
+local function SetDelayedTooltip(widget, showFn)
+	widget:SetScript("OnEnter", function(self)
+		self.drTooltipElapsed = 0
+		self:SetScript("OnUpdate", function(self, elapsed)
+			self.drTooltipElapsed = self.drTooltipElapsed + elapsed
+			if self.drTooltipElapsed >= TOOLTIP_DELAY then
+				self:SetScript("OnUpdate", nil)
+				showFn(self)
+			end
+		end)
+	end)
+	widget:SetScript("OnLeave", function(self)
+		self:SetScript("OnUpdate", nil)
+		GameTooltip:Hide()
+	end)
+end
+
 local function HudWingLevelRange()
 	if hudInfo and hudInfo.level then
 		return hudInfo.level, hudInfo.maxLevel or hudInfo.level
@@ -302,6 +321,11 @@ local function BuildHudFrame()
 		SetMinimapOverlay(false)
 		f:Hide()
 	end)
+	SetDelayedTooltip(closeBtn, function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+		GameTooltip:SetText("Close the route HUD", 1, 1, 1)
+		GameTooltip:Show()
+	end)
 
 	hudMinimizeBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
 	hudMinimizeBtn:SetWidth(20)
@@ -324,6 +348,11 @@ local function BuildHudFrame()
 			hudMinimizeBtn:SetText("_")
 		end
 	end)
+	SetDelayedTooltip(hudMinimizeBtn, function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+		GameTooltip:SetText("Minimize/restore the HUD", 1, 1, 1)
+		GameTooltip:Show()
+	end)
 
 	hudMinimapBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
 	hudMinimapBtn:SetWidth(20)
@@ -332,13 +361,12 @@ local function BuildHudFrame()
 	hudMinimapBtn:SetPoint("RIGHT", hudMinimizeBtn, "LEFT", -2, 0)
 	hudMinimapBtn:SetFrameLevel(f:GetFrameLevel() + 15)
 	hudMinimapBtn:SetScript("OnClick", function() SetMinimapOverlay(not minimapActive) end)
-	hudMinimapBtn:SetScript("OnEnter", function(self)
+	SetDelayedTooltip(hudMinimapBtn, function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
 		GameTooltip:SetText("Show route markers on the minimap", 1, 1, 1)
 		GameTooltip:AddLine("Approximate only, not exact yards -- may drift, be off-scale, or misbehave with minimap rotation enabled.", 0.9, 0.6, 0.2, true)
 		GameTooltip:Show()
 	end)
-	hudMinimapBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
 	local resizeGrip = CreateFrame("Button", nil, hudContent)
 	resizeGrip:SetWidth(16)
@@ -353,6 +381,12 @@ local function BuildHudFrame()
 		f:StopMovingOrSizing()
 		SaveHudGeometry()
 	end)
+	SetDelayedTooltip(resizeGrip, function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:SetText("Drag to resize", 1, 1, 1)
+		GameTooltip:AddLine("Aspect ratio is locked.", 0.9, 0.9, 0.9, true)
+		GameTooltip:Show()
+	end)
 
 	hudLevelPrev = CreateFrame("Button", nil, hudContent, "UIPanelButtonTemplate")
 	hudLevelPrev:SetWidth(20)
@@ -361,6 +395,11 @@ local function BuildHudFrame()
 	hudLevelPrev:SetPoint("BOTTOMLEFT", hudContent, "BOTTOMLEFT", 2, 2)
 	hudLevelPrev:SetFrameLevel(hudContent:GetFrameLevel() + 10)
 	hudLevelPrev:SetScript("OnClick", function() ChangeHudLevel(-1) end)
+	SetDelayedTooltip(hudLevelPrev, function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:SetText("Previous level", 1, 1, 1)
+		GameTooltip:Show()
+	end)
 
 	hudLevelNext = CreateFrame("Button", nil, hudContent, "UIPanelButtonTemplate")
 	hudLevelNext:SetWidth(20)
@@ -369,6 +408,11 @@ local function BuildHudFrame()
 	hudLevelNext:SetText(">")
 	hudLevelNext:SetPoint("LEFT", hudLevelPrev, "RIGHT", 4, 0)
 	hudLevelNext:SetScript("OnClick", function() ChangeHudLevel(1) end)
+	SetDelayedTooltip(hudLevelNext, function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:SetText("Next level", 1, 1, 1)
+		GameTooltip:Show()
+	end)
 
 	return f
 end
@@ -447,12 +491,39 @@ end)
 local function CheckAndShowHud()
 	local key = ResolveCurrentDungeonKey()
 	if key then
+		if DR.db.autoHud == false then return end
 		ShowRouteHud(key)
 	elseif hudFrame then
 		SetMinimapOverlay(false)
 		hudFrame:Hide()
 	end
 end
+
+local levelTrackerElapsed = 0
+local levelTracker = CreateFrame("Frame")
+levelTracker:SetScript("OnUpdate", function(self, elapsed)
+	levelTrackerElapsed = levelTrackerElapsed + elapsed
+	if levelTrackerElapsed < 1 then return end
+	levelTrackerElapsed = 0
+
+	if not hudFrame or not hudFrame:IsShown() or not hudKnown then return end
+	if HudWingLevelRange() then return end
+	if not hudKnown.numLevels or hudKnown.numLevels <= 1 then return end
+
+	local skipped, actualLevel = DR.WithSavedMapState(function()
+		SetMapToCurrentZone()
+		local lvl = GetCurrentMapDungeonLevel()
+		if DungeonUsesTerrainMap() then
+			lvl = lvl + 1
+		end
+		return lvl
+	end)
+
+	if skipped or not actualLevel or actualLevel <= 0 then return end
+	if actualLevel ~= hudLevel then
+		ShowHudLevel(actualLevel)
+	end
+end)
 
 local settleFrame = CreateFrame("Frame")
 settleFrame:Hide()

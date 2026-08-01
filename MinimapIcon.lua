@@ -71,13 +71,23 @@ local function BuildButton()
 	end)
 
 	b:SetScript("OnEnter", function(self)
-		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-		GameTooltip:SetText("Ascension Dungeon Mapper", 1, 1, 1)
-		GameTooltip:AddLine("Click to open", 0.9, 0.9, 0.9)
-		GameTooltip:AddLine("Drag to move", 0.9, 0.9, 0.9)
-		GameTooltip:Show()
+		self.drTooltipElapsed = 0
+		self:SetScript("OnUpdate", function(self, elapsed)
+			self.drTooltipElapsed = self.drTooltipElapsed + elapsed
+			if self.drTooltipElapsed >= 0.5 then
+				self:SetScript("OnUpdate", nil)
+				GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+				GameTooltip:SetText("Ascension Dungeon Mapper", 1, 1, 1)
+				GameTooltip:AddLine("Click to open", 0.9, 0.9, 0.9)
+				GameTooltip:AddLine("Drag to move", 0.9, 0.9, 0.9)
+				GameTooltip:Show()
+			end
+		end)
 	end)
-	b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	b:SetScript("OnLeave", function(self)
+		self:SetScript("OnUpdate", nil)
+		GameTooltip:Hide()
+	end)
 
 	return b
 end
