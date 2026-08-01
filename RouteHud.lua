@@ -364,7 +364,7 @@ local function BuildHudFrame()
 	SetDelayedTooltip(hudMinimapBtn, function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
 		GameTooltip:SetText("Show route markers on the minimap", 1, 1, 1)
-		GameTooltip:AddLine("Approximate only, not exact yards -- may drift, be off-scale, or misbehave with minimap rotation enabled.", 0.9, 0.6, 0.2, true)
+		GameTooltip:AddLine("Approximate -- may drift or misbehave with minimap rotation.", 0.9, 0.6, 0.2, true)
 		GameTooltip:Show()
 	end)
 

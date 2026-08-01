@@ -546,7 +546,7 @@ function RefreshRouteBox()
 		presetBoxSlot:SetScript("OnClick", function() DR.UI.LoadRoute(name, true) end)
 		presetBoxSlot:EnableMouse(true)
 		presetBoxSlot:Show()
-		AddTooltip(presetBoxSlot, name .. " (Default)", "A built-in route for this dungeon. Read-only -- edit and Save to create your own copy.")
+		AddTooltip(presetBoxSlot, name .. " (Default)", "Built-in route. Edit and Save to make your own copy.")
 	else
 		presetBoxSlot:Hide()
 	end
@@ -770,7 +770,7 @@ local function BuildPointEditor()
 		end
 		f:Hide()
 	end)
-	AddTooltip(saveBtn, "Save", "Save the title, description, icon, and size for this marker.")
+	AddTooltip(saveBtn, "Save", "Save changes to this marker.")
 
 	local deleteBtn = CreateActionButton(f, "Delete Marker", 100)
 	deleteBtn:SetPoint("LEFT", saveBtn, "RIGHT", 8, 0)
@@ -1103,7 +1103,7 @@ local function OpenImportDialog()
 			DR.UI.HandleImport(importDialog.editBox:GetText())
 			importDialog:Hide()
 		end)
-		AddTooltip(importBtn, "Import", "Add the pasted route to this dungeon's route list.")
+		AddTooltip(importBtn, "Import", "Import the pasted route.")
 
 		local cancelBtn = CreateActionButton(importDialog, "Cancel", 80)
 		cancelBtn:SetPoint("BOTTOMRIGHT", importDialog, "BOTTOMRIGHT", -14, 14)
@@ -1343,7 +1343,7 @@ local function BuildReplacePickerDialog()
 			end
 			f:Hide()
 		end)
-		AddTooltip(btn, "Replace This Route", "Delete this route and save the shared one in its place.")
+		AddTooltip(btn, "Replace This Route", "Replace this with the shared route.")
 		f.slots[i] = btn
 	end
 
@@ -1458,7 +1458,7 @@ DR.ShareChat.onRouteReceived = function(sender, dungeonKey, routeName, routeData
 	local ownRoutes = DR.GetOwnRoutesForDungeon(dungeonKey)
 	if CountOwnRoutes(dungeonKey) >= MAX_ROUTES_PER_DUNGEON and not ownRoutes[routeName] then
 		sharePreviewDialog.acceptBtn:SetText("Save and Replace")
-		AddTooltip(sharePreviewDialog.acceptBtn, "Save and Replace", "Your routes are full for this dungeon -- pick one to replace with this shared route.")
+		AddTooltip(sharePreviewDialog.acceptBtn, "Save and Replace", "Pick a route to replace with this one.")
 		sharePreviewDialog.declineBtn:SetText("Ignore")
 		AddTooltip(sharePreviewDialog.declineBtn, "Ignore", "Don't save this shared route.")
 	else
@@ -1537,7 +1537,7 @@ local function BuildMainFrame()
 			btn:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -30)
 		end
 		btn:SetScript("OnClick", function() SetEra(era) end)
-		AddTooltip(btn, eraLabels[era], "Show " .. eraLabels[era] .. " dungeons and raids in the list.")
+		AddTooltip(btn, eraLabels[era], "Show " .. eraLabels[era] .. " dungeons and raids.")
 		prevBtn = btn
 	end
 
@@ -1564,7 +1564,7 @@ local function BuildMainFrame()
 	levelNext = CreateActionButton(f, ">", 24)
 	levelNext:SetPoint("TOPRIGHT", f, "TOPRIGHT", -14, -34)
 	levelNext:SetScript("OnClick", function() ChangeLevel(1) end)
-	AddTooltip(levelNext, "Next Level", "Switch to the next level/wing of this instance.")
+	AddTooltip(levelNext, "Next Level", "Next level or wing.")
 
 	levelText = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 	levelText:SetPoint("RIGHT", levelNext, "LEFT", -2, 0)
@@ -1574,7 +1574,7 @@ local function BuildMainFrame()
 	levelPrev = CreateActionButton(f, "<", 24)
 	levelPrev:SetPoint("RIGHT", levelText, "LEFT", -2, 0)
 	levelPrev:SetScript("OnClick", function() ChangeLevel(-1) end)
-	AddTooltip(levelPrev, "Previous Level", "Switch to the previous level/wing of this instance.")
+	AddTooltip(levelPrev, "Previous Level", "Previous level or wing.")
 
 	canvas = CreateFrame("Frame", "AscensionDungeonMapperCanvas", f)
 	canvas:SetWidth(CANVAS_W)
@@ -1633,20 +1633,20 @@ local function BuildMainFrame()
 	end
 
 	local lineBtn = ModeButton("Draw", "line", nil, toolRowX, 0)
-	AddTooltip(lineBtn, "Draw", "Freehand draw tool -- click and drag to draw a line.")
+	AddTooltip(lineBtn, "Draw", "Click and drag to draw freehand.")
 	local polylineBtn = ModeButton("Line", "polyline", lineBtn)
-	AddTooltip(polylineBtn, "Line", "Click to place a point, click again to connect it with a straight segment. Right-click to reset.")
+	AddTooltip(polylineBtn, "Line", "Click points to connect with straight lines. Right-click to reset.")
 	local pointBtn = ModeButton("Marker", "point", polylineBtn)
-	AddTooltip(pointBtn, "Marker", "Place a marker with an icon, title, description, and size.")
+	AddTooltip(pointBtn, "Marker", "Place a marker with a note and icon.")
 	local textBtn = ModeButton("Text", "textbox", pointBtn)
 	AddTooltip(textBtn, "Text", "Place a text note directly on the map.")
 	local eraseBtn = ModeButton("Erase", "erase", nil, eraseRowX, eraseRowY)
-	AddTooltip(eraseBtn, "Erase", "Click or drag over lines and markers to remove them.")
+	AddTooltip(eraseBtn, "Erase", "Click or drag to remove lines and markers.")
 
 	undoBtn = CreateActionButton(toolbar, "Undo", 70)
 	undoBtn:SetPoint("TOPLEFT", toolbar, "TOPLEFT", undoClearX, undoClearY)
 	undoBtn:SetScript("OnClick", function() DR.DrawEngine.Undo() end)
-	AddTooltip(undoBtn, "Undo", "Undo the last drawing action.")
+	AddTooltip(undoBtn, "Undo", "Undo the last action.")
 
 	clearBtn = CreateActionButton(toolbar, "Clear", 70)
 	clearBtn:SetPoint("LEFT", undoBtn, "RIGHT", TOOL_GAP, 0)
@@ -1739,12 +1739,12 @@ local function BuildMainFrame()
 	local newBtn = CreateActionButton(toolbar2, "New Route", 100)
 	newBtn:SetPoint("TOPLEFT", toolbar2, "TOPLEFT", row1X, buttonBlockTop)
 	newBtn:SetScript("OnClick", StartNewRoute)
-	AddTooltip(newBtn, "New Route", "Clear the map and start a fresh, unsaved route.")
+	AddTooltip(newBtn, "New Route", "Start a new, unsaved route.")
 
 	local saveBtn = CreateActionButton(toolbar2, "Save", 70)
 	saveBtn:SetPoint("LEFT", newBtn, "RIGHT", 6, 0)
 	saveBtn:SetScript("OnClick", function() SaveCurrentRoute() end)
-	AddTooltip(saveBtn, "Save", "Save the current route. If it's a default route, this saves your own editable copy.")
+	AddTooltip(saveBtn, "Save", "Save the current route.")
 
 	local autoSaveCheck = CreateFrame("CheckButton", "AscensionDungeonMapperAutoSaveCheck", toolbar2, "UICheckButtonTemplate")
 	autoSaveCheck:SetWidth(22)
@@ -1755,7 +1755,7 @@ local function BuildMainFrame()
 	autoSaveCheck:SetScript("OnClick", function(self)
 		DR.db.autoSave = self:GetChecked() and true or false
 	end)
-	AddTooltip(autoSaveCheck, "Auto-Save", "Automatically save the loaded route every time you make a change.")
+	AddTooltip(autoSaveCheck, "Auto-Save", "Save the route automatically as you edit.")
 
 	local autoHudCheck = CreateFrame("CheckButton", "AscensionDungeonMapperAutoHudCheck", toolbar2, "UICheckButtonTemplate")
 	autoHudCheck:SetWidth(22)
@@ -1766,22 +1766,22 @@ local function BuildMainFrame()
 	autoHudCheck:SetScript("OnClick", function(self)
 		DR.db.autoHud = self:GetChecked() and true or false
 	end)
-	AddTooltip(autoHudCheck, "Auto HUD", "Automatically pop up the route HUD when you enter a dungeon this addon recognizes.")
+	AddTooltip(autoHudCheck, "Auto HUD", "Auto-open the route HUD when you enter a recognized dungeon.")
 
 	local exportBtn = CreateActionButton(toolbar2, "Export", 80)
 	exportBtn:SetPoint("TOPLEFT", toolbar2, "TOPLEFT", row2X, buttonBlockTop - 22 - 6)
 	exportBtn:SetScript("OnClick", ExportCurrent)
-	AddTooltip(exportBtn, "Export", "Get a paste-able text string for the current route, to share outside the game.")
+	AddTooltip(exportBtn, "Export", "Get a paste-able string for the current route.")
 
 	local importBtn = CreateActionButton(toolbar2, "Import", 80)
 	importBtn:SetPoint("LEFT", exportBtn, "RIGHT", 6, 0)
 	importBtn:SetScript("OnClick", function() DR.UI.OpenImportDialog() end)
-	AddTooltip(importBtn, "Import", "Paste a route's share string to add it to this dungeon.")
+	AddTooltip(importBtn, "Import", "Paste a share string to import a route.")
 
 	local shareBtn = CreateActionButton(toolbar2, "Share", 90)
 	shareBtn:SetPoint("TOPRIGHT", toolbar2, "TOPRIGHT", -10, buttonBlockTop - 22 - 6)
 	shareBtn:SetScript("OnClick", OpenShareChannelDialog)
-	AddTooltip(shareBtn, "Share", "Share the current route directly to party, raid, or guild chat.")
+	AddTooltip(shareBtn, "Share", "Share the current route to party, raid, or guild chat.")
 
 	local creditText = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	creditText:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -30, 14)
